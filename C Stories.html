@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>C Stories</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#0f1115;--fg:#f3f1ec;--muted:#a09d96;--code:#0a0c10;--bar:rgba(255,255,255,.22);
+  --concept:#3b2a6b;--concept2:#1b1440;--build:#0f4a3f;--build2:#08241f;--quiz:#5c3d0c;--quiz2:#261806;--accent:#ffd166;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#f4efe6;--fg:#1d1b18;--muted:#6b665d;--code:#14161b;--bar:rgba(0,0,0,.2);
+  --concept:#d9ccff;--concept2:#efe9ff;--build:#bfeadc;--build2:#e6f7f0;--quiz:#ffe2a8;--quiz2:#fff3d9;--accent:#b4570a;}}
+:root[data-theme="dark"]{--bg:#0f1115;--fg:#f3f1ec;}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,sans-serif;display:flex;justify-content:center}
+#app{position:relative;width:100%;max-width:440px;height:100%;overflow:hidden}
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:32px 28px}
+h1,h2{font-family:Fraunces,Georgia,serif;margin:0 0 16px;line-height:1.15}
+h1{font-size:2.2rem}h2{font-size:1.9rem}
+p{font-size:1.18rem;line-height:1.55;margin:0 0 14px}
+code{font-family:"JetBrains Mono",ui-monospace,monospace}
+p code{background:rgba(127,127,127,.22);padding:1px 6px;border-radius:5px;font-size:.95em}
+pre{background:var(--code);color:#e8e6e1;border-radius:14px;padding:16px;margin:6px 0 14px;overflow-x:auto;font-size:.95rem;line-height:1.5}
+.btn{font:500 1rem Inter,sans-serif;padding:14px 18px;border-radius:12px;border:0;background:var(--accent);color:#14110a;cursor:pointer;margin-top:10px;text-align:center}
+.btn.alt{background:transparent;color:var(--fg);border:1px solid var(--muted)}
+.muted{color:var(--muted);font-size:.95rem}
+#story{display:none}
+#story .stage{overflow-y:auto}
+#story.quiz .stage{background:linear-gradient(160deg,var(--quiz),var(--quiz2))}
+#opts{display:flex;flex-direction:column;gap:10px;margin:8px 0}
+.opt{font:500 1rem Inter,sans-serif;text-align:left;padding:14px 16px;border-radius:12px;border:1px solid var(--muted);background:rgba(127,127,127,.12);color:var(--fg);cursor:pointer}
+.opt.ok{border-color:#4cc38a;background:rgba(76,195,138,.28)}
+.opt.bad{border-color:#e5484d;background:rgba(229,72,77,.24)}
+#fb p{margin-top:14px;font-size:1.05rem}
+#story .stage{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:84px 28px 56px;transition:background .3s;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+#story.concept .stage{background:linear-gradient(160deg,var(--concept),var(--concept2))}
+#story.build .stage{background:linear-gradient(160deg,var(--build),var(--build2))}
+#bars{position:absolute;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));display:flex;gap:4px;z-index:5}
+#bars div{flex:1;height:3px;background:var(--bar);border-radius:2px;overflow:hidden}
+#bars i{display:block;height:100%;width:0;background:var(--fg)}
+#tag{position:absolute;top:calc(28px + env(safe-area-inset-top,0px));left:20px;z-index:5;font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:500}
+#close{position:absolute;top:calc(22px + env(safe-area-inset-top,0px));right:14px;z-index:6;background:none;border:0;color:var(--fg);font-size:1.6rem;cursor:pointer}
+#hint{position:absolute;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:0;right:0;text-align:center;font-size:.78rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="screen" id="home">
+    <h1>C Stories</h1>
+    <p>Short lessons you tap through like stories. Tap right for next, left for back, hold to pause.</p>
+    <button class="btn" id="sample">Start sample lesson</button>
+    <button class="btn alt" id="pick">Open a .md lesson file</button>
+    <input type="file" id="file" accept=".md,.markdown,.txt" hidden>
+    <p class="muted" id="resume" style="margin-top:18px"></p>
+  </div>
+  <div class="screen" id="done" style="display:none">
+    <h1>Lesson complete ✓</h1>
+    <p class="muted" id="doneTitle"></p>
+    <button class="btn" id="replay">Replay</button>
+    <button class="btn alt" id="home2">Back</button>
+  </div>
+  <div id="story">
+    <div id="bars"></div><div id="tag"></div><button id="close" aria-label="Close">×</button>
+    <div class="stage" id="stage"></div>
+    <div id="hint">hold to pause</div>
+  </div>
+</div>
+<script>
+const SAMPLE = `# Part 1: The REPL
+
+@concept
+## What is a REPL?
+REPL stands for **Read, Eval, Print, Loop**. The program reads a line you type, evaluates it, prints the result, and then starts over.
+
+Python’s shell and SQLite’s command line both work this way. It’s the simplest possible shape for a database front end, which is why the tutorial starts here.
+
+---
+@concept
+## What we’ll build
+A tiny shell that shows the prompt \`db > \`, waits for a line, and quits when you type \`.exit\`. Anything else prints an error.
+
+It looks like almost nothing, but it forces us to learn the C basics every later part depends on: strings, pointers, structs, and manual memory.
+
+---
+@concept
+## Anatomy of a C program
+Every C program starts at \`main\`. Its return value is the exit code: \`0\` means success, anything else means failure.
+
+\`\`\`c
+#include <stdio.h>
+
+int main() {
+  printf("hello\\n");
+  return 0;
+}
+\`\`\`
+
+\`#include\` pastes in a header, here the declarations for \`printf\`.
+
+---
+@concept
+## Compile and run
+C has no interpreter. You compile source into a binary, then run the binary.
+
+\`\`\`sh
+gcc main.c -o db
+./db
+\`\`\`
+
+\`-o db\` names the output file. Every change to the code needs a recompile.
+
+---
+@concept
+## printf and format specifiers
+\`printf\` prints a template, filling placeholders with the arguments you pass after it.
+
+\`\`\`c
+printf("%d items\\n", 3);
+printf("name: %s\\n", "bob");
+\`\`\`
+
+\`%d\` is an integer, \`%s\` is a string, \`%c\` is one character. The compiler won’t stop you from picking the wrong one.
+
+---
+@quiz
+## Which line prints: id 42?
+- [ ] \`printf("id %s", 42);\`
+- [x] \`printf("id %d", 42);\`
+- [ ] \`printf("id", %d, 42);\`
+> \`%d\` is the placeholder for an integer. Using \`%s\` would make printf treat 42 as a memory address and likely crash.
+
+---
+@concept
+## Pointers: addresses
+Every variable lives at an address in memory. A **pointer** is a variable that stores one.
+
+\`\`\`c
+int x = 5;
+int *p = &x;
+\`\`\`
+
+\`&x\` means “the address of x”. \`p\` now holds that address, so we say p points to x.
+
+---
+@concept
+## Pointers: dereferencing
+\`*p\` follows the pointer to the value it points at. You can read through it and also write through it.
+
+\`\`\`c
+int x = 5;
+int *p = &x;
+*p = 9;
+printf("%d", x);
+\`\`\`
+
+Writing through \`p\` changed \`x\`. This is how C functions modify a caller’s variables.
+
+---
+@quiz
+## What does the code on the previous card print?
+- [ ] 5
+- [x] 9
+- [ ] An address
+> \`p\` points at \`x\`, so \`*p = 9\` overwrites \`x\` itself. Printing \`x\` gives 9.
+
+---
+@concept
+## Strings are char arrays
+C has no string type. A string is an array of \`char\` ending with a zero byte, \`'\\0'\`.
+
+\`\`\`c
+char s[] = "hi";   // 'h' 'i' '\\0'
+\`\`\`
+
+That’s why \`"hi"\` takes 3 bytes, and why you compare strings with \`strcmp\`, not \`==\`. \`==\` would compare addresses.
+
+---
+@concept
+## Structs
+A **struct** groups related values under one name. We’ll use one to hold the user’s input.
+
+\`\`\`c
+typedef struct {
+  char *buffer;
+  size_t buffer_length;
+} InputBuffer;
+\`\`\`
+
+With a pointer to a struct, use \`->\` to reach fields: \`input->buffer\`.
+
+---
+@concept
+## malloc: memory on demand
+Local variables disappear when a function returns. To get memory that outlives it, ask for space on the **heap** with \`malloc\`.
+
+\`\`\`c
+InputBuffer *b = malloc(sizeof(InputBuffer));
+\`\`\`
+
+\`malloc(n)\` gives you \`n\` bytes and returns a pointer to them. The memory is **not** cleared, so it contains garbage until you set it.
+
+---
+@concept
+## free: giving it back
+Heap memory is yours until you return it. Nothing does that automatically.
+
+\`\`\`c
+free(b);
+\`\`\`
+
+Forget it and you get a **memory leak**. Use \`b\` after freeing it and you get a **dangling pointer**, which is undefined behavior.
+
+---
+@quiz
+## What does malloc return when it can’t find enough memory?
+- [ ] 0 bytes of valid memory
+- [x] \`NULL\`
+- [ ] It crashes the program
+> \`malloc\` returns \`NULL\` on failure, so production code checks for it before using the pointer.
+
+---
+@quiz
+## After \`free(p)\`, what is true about \`p\`?
+- [ ] \`p\` automatically becomes \`NULL\`
+- [x] \`p\` still holds the old address, but using it is undefined behavior
+- [ ] \`p\` points to a fresh empty block
+> \`free\` doesn’t touch your pointer variable. A common habit is to set \`p = NULL\` right after freeing.
+
+---
+@build
+## Create the input buffer
+Now the real code. First, a function to allocate and initialize our struct.
+
+\`\`\`c
+InputBuffer *new_input_buffer() {
+  InputBuffer *b = malloc(sizeof(InputBuffer));
+  b->buffer = NULL;
+  b->buffer_length = 0;
+  return b;
+}
+\`\`\`
+
+\`NULL\` tells \`getline\` to allocate for us.
+
+---
+@build
+## Print the prompt
+A one-line function. We’ll call it before every read.
+
+\`\`\`c
+void print_prompt() {
+  printf("db > ");
+}
+\`\`\`
+
+No \`\\n\` at the end, so the cursor stays on the same line as the prompt.
+
+---
+@build
+## Read a line
+\`getline\` reads a whole line and grows the buffer as needed.
+
+\`\`\`c
+void read_input(InputBuffer *b) {
+  ssize_t n = getline(&b->buffer, &b->buffer_length, stdin);
+  if (n <= 0) exit(EXIT_FAILURE);
+  b->buffer[n - 1] = 0;   // drop the newline
+}
+\`\`\`
+
+\`getline\` returns the number of bytes read, or -1 on error.
+
+---
+@quiz
+## Why do we pass \`&b->buffer\` to getline instead of \`b->buffer\`?
+- [ ] To make the call faster
+- [x] So getline can allocate memory and update our pointer
+- [ ] Because strings must be passed by address
+> C passes arguments by value. To let a function change *where our pointer points*, we pass the address of the pointer.
+
+---
+@build
+## The main loop
+Put it together: prompt, read, check, repeat.
+
+\`\`\`c
+int main() {
+  InputBuffer *b = new_input_buffer();
+  while (true) {
+    print_prompt();
+    read_input(b);
+    if (strcmp(b->buffer, ".exit") == 0) {
+      exit(EXIT_SUCCESS);
+    } else {
+      printf("Unrecognized command '%s'.\\n", b->buffer);
+    }
+  }
+}
+\`\`\`
+
+---
+@build
+## Run it
+Compile, run, and try a few lines.
+
+\`\`\`sh
+$ ./db
+db > hello
+Unrecognized command 'hello'.
+db > .exit
+\`\`\`
+
+You’ve built a working REPL and met pointers, structs, and the heap. Next part: turning input into real SQL statements.
+`;
+
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const inline=s=>esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+
+function body(md){
+  let out='',inC=false,buf=[];
+  const fl=()=>{if(buf.length){out+='<p>'+inline(buf.join(' '))+'</p>';buf=[];}};
+  for(const l of md.split('\n')){
+    if(l.startsWith('```')){ if(inC){out+='</code></pre>';inC=false;}else{fl();out+='<pre><code>';inC=true;} continue; }
+    if(inC){out+=esc(l)+'\n';continue;}
+    if(!l.trim()){fl();continue;}
+    buf.push(l);
+  }
+  fl(); if(inC)out+='</code></pre>'; return out;
+}
+
+function parse(md){
+  let title='Lesson';
+  md=md.replace(/^\s*# (.+)\n/,(m,a)=>{title=a.trim();return '';});
+  const cards=md.split(/^---\s*$/m).map(c=>c.trim()).filter(Boolean).map(c=>{
+    const lines=c.split('\n'); let tag='concept',h='';
+    while(lines.length){
+      const l=lines[0].trim();
+      if(l.startsWith('@')){tag=l.slice(1).trim();lines.shift();}
+      else if(l.startsWith('## ')){h=l.slice(3).trim();lines.shift();}
+      else if(!l){lines.shift();}
+      else break;
+    }
+    const text=lines.join('\n');
+    const code=(text.match(/```[\s\S]*?```/g)||[]).join('\n').split('\n').length;
+    const words=text.replace(/```[\s\S]*?```/g,'').split(/\s+/).length;
+    if(tag==='quiz'){
+      const opts=[],pl=[];let exp='';
+      for(const l of text.split('\n')){const m=l.match(/^- \[( |x)\] (.+)$/);if(m)opts.push({t:m[2],ok:m[1]==='x'});else if(l.startsWith('> '))exp+=l.slice(2)+' ';else pl.push(l);}
+      return {tag:'quiz',h,html:body(pl.join('\n')),quiz:{opts,exp:exp.trim()},dur:Infinity};
+    }
+    return {tag:tag==='build'?'build':'concept',h,html:body(text),dur:Math.min(20,Math.max(5,3+words*.35+code*.8))*1000};
+  });
+  return {title,cards};
+}
+
+let lesson=null,i=0,elapsed=0,last=0,paused=false,raf=0,answered=false,score=0,total=0;
+const key=()=>'cstories:'+lesson.title;
+const save=v=>{try{localStorage.setItem(key(),JSON.stringify(v));}catch(e){}};
+const load=t=>{try{return JSON.parse(localStorage.getItem('cstories:'+t));}catch(e){return null;}};
+
+function show(id){['home','done','story'].forEach(s=>$(s).style.display=(s===id?(s==='story'?'block':'flex'):'none'));}
+
+function start(md,from=0){
+  lesson=parse(md); if(!lesson.cards.length)return;score=0;total=0;
+  $('bars').innerHTML=lesson.cards.map(()=>'<div><i></i></div>').join('');
+  show('story'); go(from);
+}
+function go(n){
+  if(n<0)n=0;
+  if(n>=lesson.cards.length){save({i:0,done:true});cancelAnimationFrame(raf);$('doneTitle').textContent=lesson.title+(total?' · Quiz '+score+'/'+total:'');show('done');return;}
+  i=n;elapsed=0;last=performance.now();
+  const c=lesson.cards[i];
+  $('story').className=c.tag;
+  $('tag').textContent=({build:'Build',quiz:'Quiz'}[c.tag]||'Concept')+' · '+(i+1)+'/'+lesson.cards.length;
+  answered=false;
+  $('stage').innerHTML=(c.h?'<h2>'+inline(c.h)+'</h2>':'')+c.html+(c.quiz?'<div id="opts">'+c.quiz.opts.map((o,k)=>'<button class="opt" data-k="'+k+'">'+inline(o.t)+'</button>').join('')+'</div><div id="fb"></div>':'');
+  $('stage').scrollTop=0;
+  if(c.quiz)document.querySelectorAll('.opt').forEach(b=>b.onclick=()=>answer(+b.dataset.k));
+  [...$('bars').children].forEach((d,k)=>d.firstChild.style.width=k<i?'100%':'0');
+  save({i,done:false});
+  cancelAnimationFrame(raf);raf=requestAnimationFrame(tick);
+}
+function answer(k){
+  if(answered)return;answered=true;const q=lesson.cards[i].quiz;total++;if(q.opts[k].ok)score++;
+  document.querySelectorAll('.opt').forEach((b,j)=>{b.disabled=true;if(q.opts[j].ok)b.classList.add('ok');else if(j===k)b.classList.add('bad');});
+  $('fb').innerHTML='<p>'+(q.opts[k].ok?'Correct. ':'Not quite. ')+inline(q.exp)+'</p><button class="btn next">Continue</button>';
+  $('fb').querySelector('.next').onclick=()=>go(i+1);
+  $('bars').children[i].firstChild.style.width='100%';
+}
+function tick(now){
+  if(!paused)elapsed+=now-last; last=now;
+  const c=lesson.cards[i];if(c.quiz){raf=requestAnimationFrame(tick);return;}const p=Math.min(1,elapsed/c.dur);
+  $('bars').children[i].firstChild.style.width=(p*100)+'%';
+  if(p>=1){go(i+1);return;}
+  raf=requestAnimationFrame(tick);
+}
+
+const stage=$('stage');let downT=0;
+stage.addEventListener('pointerdown',()=>{paused=true;downT=performance.now();$('hint').style.opacity=0;});
+const release=e=>{
+  if(!paused)return; paused=false;
+  if(!e.target.closest('button')&&performance.now()-downT<300){
+    const r=stage.getBoundingClientRect();
+    const f=(e.clientX-r.left)>=r.width*.35;if(f&&lesson.cards[i].quiz&&!answered)return;go(f?i+1:i-1);
+  }
+};
+stage.addEventListener('pointerup',release);
+stage.addEventListener('pointercancel',()=>{paused=false;});
+document.addEventListener('keydown',e=>{
+  if($('story').style.display!=='block')return;
+  if((e.key==='ArrowRight'||e.key===' ')&&!(lesson.cards[i].quiz&&!answered))go(i+1);
+  if(e.key==='ArrowLeft')go(i-1);
+});
+$('close').onclick=()=>{cancelAnimationFrame(raf);home();};
+
+function home(){
+  show('home');
+  const s=load('Part 1: The REPL');
+  $('resume').textContent=s&&s.done?'Sample lesson: completed ✓':(s&&s.i?'Sample lesson: card '+(s.i+1)+' saved':'');
+}
+$('sample').onclick=()=>{const s=load('Part 1: The REPL');start(SAMPLE,s&&!s.done?s.i:0);};
+$('pick').onclick=()=>$('file').click();
+$('file').onchange=async e=>{const f=e.target.files[0];if(f){const md=await f.text();const t=(md.match(/^\s*# (.+)\n/)||[])[1];const s=t&&load(t.trim());start(md,s&&!s.done?s.i:0);}};
+$('replay').onclick=()=>{score=0;total=0;go(0);show('story');};
+$('home2').onclick=home;
+addEventListener('dragover',e=>e.preventDefault());
+addEventListener('drop',async e=>{
+  e.preventDefault();
+  const f=e.dataTransfer.files[0];if(f)start(await f.text());
+});
+home();
+</script>
+</body>
+</html>
