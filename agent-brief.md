@@ -95,3 +95,34 @@ Accounts, backend, search, streaks, reminders, images, extra courses (Redis, she
 - Do not add features, dependencies or content that were not requested.
 - If a request conflicts with this file, ask the owner which one wins.
 - Keep your replies short and plain.
+
+## 10. Decisions (addendum)
+
+These decisions are final.
+
+### Platform
+
+- The course targets **Linux and macOS**. Windows is not supported (WSL works).
+- POSIX functions are allowed and expected: `getline`, `open`, `read`, `write`, `lseek` and similar.
+- State the platform **once**, in one plain sentence, in the first C Basics lesson. Example: "This course targets Linux and macOS; on Windows, use WSL."
+- Do not add portability notes anywhere else.
+
+### Non-standard C
+
+- Do **not** teach or use arithmetic on `void *`. It is a GCC extension, not standard C.
+- When moving by bytes, use `char *` (or `uint8_t *`). Explain pointer arithmetic with that type.
+
+### Our own code
+
+- Write all lesson code from our own corrected version, **not** from the tutorial's diffs.
+- Follow the best-practice rules in the brief: needed headers, `-Wall -Wextra`, check `malloc`, call `free`, strip a newline only if it exists.
+
+### Scope of the concept list
+
+- Keep the inventory as a raw list, but when proposing the C Basics lesson list, apply this rule: **a concept gets its own lesson only if it is specific to C and a programmer could not guess it from another language.** Everything else becomes a one-sentence explanation inside a card, or is cut.
+- Keep the Basics list short.
+- Order lessons by first use in the SQLite course.
+
+### Checkpoint addition
+
+- When you submit the Basics lesson list for approval, include a short list of places where our code will differ from the tutorial's code (for example, the `void *` replacement). This list is for the owner only. Do not put it in the lessons.
