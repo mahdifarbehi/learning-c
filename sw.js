@@ -1,5 +1,7 @@
-const CACHE_NAME = 'c-stories-v1';
+const CACHE_NAME = 'c-stories-v2';
 const APP_FILES = [
+  './',
+  './index.html',
   './C Stories.html',
   './manifest.webmanifest',
   './icons/icon-192.png',
