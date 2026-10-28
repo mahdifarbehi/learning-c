@@ -74,7 +74,7 @@ The `requires:` line goes right after the lesson title, for example:
 ## 6. App rules (v1)
 - Static files only. No backend, no accounts, no framework, no build step if avoidable.
 - PWA: web manifest and a service worker so it works offline and is installable.
-- Cards: tap right side = next, tap left side = back, hold = pause, auto-advance on a timer, quiz cards never auto-advance.
+- Cards advance only by hand: tap right side = next and tap left side = back. There is no timer or automatic advance; unanswered quiz cards cannot move forward.
 - Progress is saved on the device with `localStorage`: last card seen and completed lessons.
 - Keep the existing minimal visual style: dark background, serif headings, monospace code, purple for concept cards, green for build cards, amber for quiz cards.
 - A working prototype, `c-stories.html` (a single file), is provided. Start from it and keep its behavior. Do not redesign it.

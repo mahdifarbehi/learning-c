@@ -69,12 +69,12 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
   <main class="screen list-screen" id="home">
     <p class="eyebrow">Learn by building</p>
     <h1>C Stories</h1>
-    <p>Short lessons you tap through like stories. Tap right for next, left for back, and hold to pause.</p>
+    <p>Short lessons you move through by hand. Tap right for next and left for back.</p>
     <div class="course-list" id="courses"></div>
     <button class="btn alt" id="pick">Open a .md lesson file</button>
     <input type="file" id="file" accept=".md,.markdown,.txt" hidden>
     <p class="muted" id="offline" style="margin-top:14px">Progress stays on this device.</p>
-    <a class="btn alt" href="doom-fire.html">do you wanna see some fire?</a>
+    <a class="btn alt" href="doom-fire.html">🔥 do you wanna see some fire? 🔥</a>
   </main>
 
   <section class="screen list-screen" id="course" style="display:none">
@@ -105,7 +105,7 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
   <div id="story">
     <div id="bars"></div><div id="tag"></div><button id="close" aria-label="Close">×</button>
     <div class="stage" id="stage"></div>
-    <div id="hint">hold to pause</div>
+    <div id="hint">tap left or right</div>
   </div>
 </div>
 <script>
@@ -193,8 +193,6 @@ function parse(markdown){
       else break;
     }
     const text=lines.join('\n');
-    const codeLines=(text.match(/```[\s\S]*?```/g)||[]).join('\n').split('\n').length;
-    const words=text.replace(/```[\s\S]*?```/g,'').trim().split(/\s+/).filter(Boolean).length;
     if(tag==='quiz'){
       const options=[],prose=[];let explanation='';
       for(const line of text.split('\n')){
@@ -203,9 +201,9 @@ function parse(markdown){
         else if(line.startsWith('> '))explanation+=line.slice(2)+' ';
         else prose.push(line);
       }
-      return {tag:'quiz',heading,html:body(prose.join('\n')),quiz:{options,explanation:explanation.trim()},duration:Infinity};
+      return {tag:'quiz',heading,html:body(prose.join('\n')),quiz:{options,explanation:explanation.trim()}};
     }
-    return {tag:tag==='build'?'build':'concept',heading,html:body(text),duration:Math.min(24,Math.max(6,3+words*.36+codeLines*.75))*1000};
+    return {tag:tag==='build'?'build':'concept',heading,html:body(text)};
   });
   return {title,requires,cards};
 }
@@ -298,7 +296,7 @@ function renderPrerequisites(){
 }
 
 let lesson=null,currentItem=null,currentMarkdown='',returnTarget={type:'home'};
-let cardIndex=0,elapsed=0,lastFrame=0,paused=false,animation=0,answered=false,score=0,total=0;
+let cardIndex=0,answered=false,score=0,total=0;
 
 function beginLesson(item,markdown,target){
   lesson=parse(markdown);
@@ -306,7 +304,7 @@ function beginLesson(item,markdown,target){
   currentItem=item;
   currentMarkdown=markdown;
   returnTarget=target;
-  score=0;total=0;paused=false;
+  score=0;total=0;
   const progress=item?.path?loadProgress(item.path):null;
   const startAt=progress&&!progress.done?progress.card||0:0;
   $('bars').innerHTML=lesson.cards.map(()=>'<div><i></i></div>').join('');
@@ -324,11 +322,11 @@ function persist(done=false){
 function go(next){
   if(next<0)next=0;
   if(next>=lesson.cards.length){
-    persist(true);cancelAnimationFrame(animation);
+    persist(true);
     $('doneTitle').textContent=lesson.title+(total?` · Quiz ${score}/${total}`:'');
     show('done');return;
   }
-  cardIndex=next;elapsed=0;lastFrame=performance.now();paused=false;
+  cardIndex=next;
   const card=lesson.cards[cardIndex];
   $('story').className=card.tag;
   $('tag').textContent=({build:'Build',quiz:'Quiz'}[card.tag]||'Concept')+` · ${cardIndex+1}/${lesson.cards.length}`;
@@ -339,7 +337,6 @@ function go(next){
   if(card.quiz)document.querySelectorAll('.opt').forEach(button=>button.onclick=()=>answer(Number(button.dataset.index)));
   [...$('bars').children].forEach((bar,index)=>bar.firstChild.style.width=index<cardIndex?'100%':'0');
   persist(false);
-  cancelAnimationFrame(animation);animation=requestAnimationFrame(tick);
 }
 
 function answer(index){
@@ -356,37 +353,32 @@ function answer(index){
   $('bars').children[cardIndex].firstChild.style.width='100%';
 }
 
-function tick(now){
-  if(!paused)elapsed+=now-lastFrame;
-  lastFrame=now;
-  const card=lesson.cards[cardIndex];
-  if(card.quiz){animation=requestAnimationFrame(tick);return;}
-  const fraction=Math.min(1,elapsed/card.duration);
-  $('bars').children[cardIndex].firstChild.style.width=(fraction*100)+'%';
-  if(fraction>=1){go(cardIndex+1);return;}
-  animation=requestAnimationFrame(tick);
-}
-
 function leaveStory(){
-  cancelAnimationFrame(animation);
   if(returnTarget.type==='prereqs'&&pending)renderPrerequisites();
   else if(returnTarget.type==='course')renderCourse(returnTarget.courseId);
   else renderHome();
 }
 
-const stage=$('stage');let pointerDownAt=0;
-stage.addEventListener('pointerdown',()=>{paused=true;pointerDownAt=performance.now();$('hint').style.opacity=0;});
+const stage=$('stage');
+let pointerDownAt=0,pointerStartX=0,pointerStartY=0,pointerActive=false;
+stage.addEventListener('pointerdown',event=>{
+  pointerActive=true;
+  pointerDownAt=performance.now();
+  pointerStartX=event.clientX;
+  pointerStartY=event.clientY;
+});
 stage.addEventListener('pointerup',event=>{
-  if(!paused)return;
-  paused=false;
-  if(!event.target.closest('button')&&performance.now()-pointerDownAt<300){
+  if(!pointerActive)return;
+  pointerActive=false;
+  const moved=Math.hypot(event.clientX-pointerStartX,event.clientY-pointerStartY);
+  if(!event.target.closest('button')&&performance.now()-pointerDownAt<300&&moved<12){
     const bounds=stage.getBoundingClientRect();
     const forward=(event.clientX-bounds.left)>=bounds.width*.35;
     if(forward&&lesson.cards[cardIndex].quiz&&!answered)return;
     go(forward?cardIndex+1:cardIndex-1);
   }
 });
-stage.addEventListener('pointercancel',()=>{paused=false;});
+stage.addEventListener('pointercancel',()=>{pointerActive=false;});
 document.addEventListener('keydown',event=>{
   if($('story').style.display!=='block')return;
   if((event.key==='ArrowRight'||event.key===' ')&&!(lesson.cards[cardIndex].quiz&&!answered))go(cardIndex+1);
