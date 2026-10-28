@@ -1,8 +1,9 @@
-const CACHE_NAME = 'c-stories-v2';
+const CACHE_NAME = 'c-stories-v3';
 const APP_FILES = [
   './',
   './index.html',
   './C Stories.html',
+  './doom-fire.html',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
