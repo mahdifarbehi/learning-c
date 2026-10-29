@@ -1,99 +1,182 @@
-# Update a parent after a leaf split
-requires: c-basics/how-c-becomes-a-program, c-basics/pointers, c-basics/heap-memory, c-basics/arrays-strings-buffers, c-basics/bytes-and-layout
+# Update a parent after a split
+requires: c-basics/pointers, c-basics/bytes-and-layout
 
 @concept
-## A non-root split has a parent
-Splitting a leaf creates a new right sibling, but the existing parent still describes only the old child.
-
-We must update the old separator and insert a child entry for the new leaf.
-
----
-@build
-## Preserve the old maximum
-Read the leaf's maximum before redistribution, then compare it with the maximum afterward.
-
-```c
-uint32_t old_max = leaf_key(left, leaf_count(left) - 1);
-/* redistribute cells */
-uint32_t new_max = leaf_key(left, leaf_count(left) - 1);
-uint32_t parent_number = read_u32(left, PARENT_OFFSET);
-uint8_t *parent = pager_get_page(table->pager, parent_number);
+## A split below the root
+When a leaf under the root splits, there is no new root. The parent gains one more child, the new leaf, right after the old one. The parent also needs keys that match its children again.
+```diagram
+before: root 7 | leaves 1-7, 8-20
+insert 21
+after: root 7 14 | leaves 1-7, 8-14, 15-21
 ```
-
-Set the new leaf's parent field to the same page number.
-
+---
+@concept
+## Finding the parent
+A node needs to know its parent. Bytes 2-5 of the header have been reserved for this from the start: the **parent pointer**, which holds the parent's page number.
 ---
 @build
-## Replace the old separator
-Find the separator that used to represent the left child and replace it with the child's new maximum.
-
+## Parent accessors
+Next to `set_node_root`:
 ```c
-void update_internal_key(uint8_t *node,
-                         uint32_t old_key,
-                         uint32_t new_key) {
-  uint32_t index = internal_child_index(node, old_key);
-  if (index < internal_count(node)) {
-    set_internal_key(node, index, new_key);
-  }
+uint32_t node_parent(char *node) {
+  return read_u32(node + PARENT_OFFSET);
+}
+
+void set_node_parent(char *node, uint32_t page_num) {
+  write_u32(node + PARENT_OFFSET, page_num);
 }
 ```
-
-The separate right child has no separator to replace; `internal_insert` handles it when the new sibling is added.
-
----
-@concept
-## The right child is special
-An internal node with `n` keys has `n + 1` children. Its final child has no separator to its right, so it lives in the header.
-
-Inserting the new largest child moves the old right child into a normal cell and makes the new child the right child.
-
 ---
 @build
-## Insert a non-largest child
-For any other position, move later cells right and write the new child and its maximum key.
-
+## Children learn their parent
+In `set_internal_node_children`, add one line at the end of the loop:
 ```c
-size_t offset = INTERNAL_HEADER_SIZE + index * INTERNAL_CELL_SIZE;
-size_t later_bytes = (count - index) * INTERNAL_CELL_SIZE;
-memmove(parent + offset + INTERNAL_CELL_SIZE,
-        parent + offset,
-        later_bytes);
-set_internal_child(parent, index, child_page_number);
-set_internal_key(parent, index, child_max);
-set_internal_count(parent, count + 1);
+    set_node_parent(get_page(pager, children[i]), page_num);
 ```
-
-`uint8_t *` makes every offset a byte offset.
-
----
-@build
-## Finish a non-root leaf split
-After relinking the leaves and setting their counts, repair the parent in this order:
-
-```c
-write_u32(right, PARENT_OFFSET, parent_number);
-update_internal_key(parent, old_max, new_max);
-internal_insert(table, parent_number, right_page_number);
-```
-
-The parent then routes searches to both leaves.
-
+Every time a node gets its children, each child records who its parent is. `create_new_root` uses this function too, so both halves of a root split get the root as their parent.
 ---
 @concept
-## Stop before overflowing the parent
-For visible tests, internal nodes hold only three keys. At this checkpoint, inserting into a full internal node is still a fatal “not implemented” condition.
+## Rebuild the list of children
+To add a child, we read the parent's children into a small array, put the new page right after the old one, and write the whole list back with `set_internal_node_children`. That also recomputes every key, including the old child's, whose largest key just got smaller.
+---
+@build
+## A small limit
+```c
+#define INTERNAL_MAX_KEYS 3
+```
+Put it after `INTERNAL_CELL_SIZE`. A page has room for about 500 keys, but with 3, internal nodes fill up after a few dozen rows, so you can watch them split.
+---
+@build
+## internal_node_insert
+Put this above `leaf_node_split_and_insert`:
+```c
+// Puts right_page_num into the parent, just after left_page_num.
+void internal_node_insert(Table *table, uint32_t parent_page_num,
+                          uint32_t left_page_num, uint32_t right_page_num) {
+  Pager *pager = &table->pager;
+  char *parent = get_page(pager, parent_page_num);
 
-The next lesson replaces that temporary stop with recursive internal-node splitting.
-
+  uint32_t children[INTERNAL_MAX_KEYS + 2];
+  uint32_t count = 0;
+  for (uint32_t i = 0; i <= internal_node_num_keys(parent); i++) {
+    uint32_t child = internal_node_child(parent, i);
+    children[count] = child;
+    count += 1;
+    if (child == left_page_num) {
+      children[count] = right_page_num;
+      count += 1;
+    }
+  }
+```
+The array has room for one child more than a full node holds.
+---
+@build
+## Write the list back
+```c
+  if (count > INTERNAL_MAX_KEYS + 1) {
+    fprintf(stderr, "Need to implement splitting internal node.\n");
+    exit(EXIT_FAILURE);
+  }
+  set_internal_node_children(pager, parent_page_num, children, count);
+}
+```
+A full parent would have to split too. That is the next lesson.
+---
+@build
+## insert_into_parent
+```c
+// After a node splits, records its new right half in the parent.
+void insert_into_parent(Table *table, uint32_t left_page_num,
+                        uint32_t right_page_num) {
+  char *left = get_page(&table->pager, left_page_num);
+  if (is_node_root(left)) {
+    create_new_root(table, right_page_num);
+    return;
+  }
+  internal_node_insert(table, node_parent(left), left_page_num,
+                       right_page_num);
+}
+```
+---
+@build
+## Use it after a leaf split
+At the end of `leaf_node_split_and_insert`, replace the `if (is_node_root(old_node))` block with:
+```c
+  insert_into_parent(cursor->table, cursor->page_num, new_page_num);
+```
+---
+@build
+## Run it
+```console
+$ rm -f test.db
+$ cc -Wall -Wextra -o db db.c
+$ for i in $(seq 1 28); do echo "insert $i user$i u$i@example.com"; done > rows.txt
+$ ./db test.db < rows.txt > /dev/null
+$ ./db test.db
+db > .btree
+Tree:
+- internal (size 3)
+  - leaf (size 7)
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+  - key 7
+  - leaf (size 7)
+    - 8
+    - 9
+    - 10
+    - 11
+    - 12
+    - 13
+    - 14
+  - key 14
+  - leaf (size 7)
+    - 15
+    - 16
+    - 17
+    - 18
+    - 19
+    - 20
+    - 21
+  - key 21
+  - leaf (size 7)
+    - 22
+    - 23
+    - 24
+    - 25
+    - 26
+    - 27
+    - 28
+db > .exit
+```
+The root now has its maximum of 3 keys and 4 children.
+---
+@build
+## The next limit
+```console
+$ rm -f test.db
+$ for i in $(seq 1 34); do echo "insert $i user$i u$i@example.com"; done > rows.txt
+$ ./db test.db < rows.txt > /dev/null
+$ ./db test.db
+db > insert 35 user35 u35@example.com
+Need to implement splitting internal node.
+```
+The last leaf is full again. Splitting it would give the root a fifth child.
 ---
 @quiz
-## What happens to a separator after its left leaf's maximum changes?
-- [ ] It keeps the leaf's old maximum
-- [x] It is replaced with the leaf's new maximum
-- [ ] It becomes the leaf's row count
-> A separator must always equal the maximum key reachable through the child to its left.
-
+## The parent has 3 keys and one of its leaves splits. What happens now?
+- [ ] The parent stores 4 keys
+- [x] `Need to implement splitting internal node.`
+- [ ] The new leaf is dropped
+> 3 keys is the maximum, so a fifth child does not fit.
 ---
-@build
-## Verify an out-of-order workload
-Insert enough shuffled ids to split a non-root leaf. `.btree` should show correct separators, and `select` should still print every row once in ascending id order.
+@quiz
+## Why does set_internal_node_children recompute every key?
+- [ ] Keys are stored in a different order on disk
+- [x] After a split, the old child's largest key is smaller
+- [ ] To check the file for errors
+> The old child gave its upper half away, so its key in the parent must change.

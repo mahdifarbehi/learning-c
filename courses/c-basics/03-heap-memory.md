@@ -1,128 +1,86 @@
 # Heap memory and ownership
 
 @concept
-## Local objects have automatic lifetime
-An object declared inside a function normally exists until execution leaves its block. C calls this **automatic storage duration**.
+## Stack and heap
+Local variables live on the **stack**. They appear when the function starts and are gone when it returns.
 
+The **heap** is memory you ask for and give back yourself. It stays until you free it. C has no garbage collector.
+---
+@concept
+## A local dies with its function
 ```c
-void example(void) {
-  int count = 5;
+int *broken(void) {
+  int x = 5;
+  return &x;  // x is gone after return
 }
 ```
-
-`count` stops existing when `example` returns.
-
+The returned address points at memory that no longer belongs to `x`. Using it is undefined behavior. `-Wall` warns about this.
 ---
 @concept
-## Allocated memory lasts until free
-The **heap** is memory a program requests while it runs. An allocated block remains available across function calls until the program releases it with `free`.
-
-C does not release individual heap allocations automatically.
-
----
-@concept
-## Size the object, not its spelling
-The `sizeof` operator reports how many bytes its operand's type needs. `sizeof *number` therefore asks for the size of the object that `number` points to.
-
+## malloc asks for bytes
 ```c
-#include <stdio.h>
-
-int *number = NULL;
-printf("%zu\n", sizeof *number);
+User *u = malloc(sizeof(User));
 ```
+`malloc(n)` reserves `n` bytes on the heap and returns their address. `sizeof(User)` is the number of bytes a `User` needs. `malloc` comes from `<stdlib.h>`.
 
-`sizeof` uses the pointed-to type without following the null pointer. If the pointer's type changes later, this expression still produces the matching size.
-
+`malloc` returns a `void *`, a pointer with no type. C converts it to `User *` for you.
 ---
 @concept
-## malloc requests a block
-`malloc` requests a number of bytes and returns a pointer to the new block.
-
+## malloc can fail
+When there is no memory left, `malloc` returns `NULL`. Check every time:
 ```c
-#include <stdio.h>
-#include <stdlib.h>
-
-int *number = malloc(sizeof *number);
-```
-
-C converts the returned pointer to the target pointer type without a cast. The next card checks the result before it is used.
-
----
-@concept
-## Allocation can fail
-When `malloc` cannot provide the requested block, it returns `NULL`. Check before dereferencing the result.
-
-```c
-if (number == NULL) {
-  fprintf(stderr, "Could not allocate memory.\n");
+if (u == NULL) {
+  perror("malloc");
   exit(EXIT_FAILURE);
 }
 ```
-
-`fprintf` writes formatted text to a chosen stream; `stderr` is C's standard error stream. `exit` ends the program, and `EXIT_FAILURE` supplies its standard failure status. A failed allocation is fatal in this course.
-
+`perror` prints your text and the reason for the last failure, for example `malloc: Cannot allocate memory`.
 ---
 @concept
-## New bytes are uninitialized
-`malloc` does not clear the block. Its bytes have indeterminate values until the program writes them.
+## New memory holds garbage
+`malloc` does not clear memory. The bytes are whatever was there before. The same goes for a local variable you do not initialize.
 
-After a successful allocation, reading `*number` before assigning it a value is undefined behavior.
-
+`calloc(count, size)` returns memory filled with zeros. `memset(p, 0, n)` sets `n` bytes at `p` to zero.
 ---
 @concept
-## Every allocation needs an owner
-The **owner** of an allocation is the part of the program responsible for eventually freeing it.
-
-Passing a pointer to a function does not transfer ownership by itself. The program must decide and document who frees the block.
-
----
-@concept
-## free releases the block
-Pass the original allocation pointer to `free` when the owner is finished with the block.
-
+## free gives it back
 ```c
-free(number);
+free(u);
 ```
+Free every block you allocate, exactly once. A block you never free is a **memory leak**. `free(NULL)` does nothing, so it is always safe.
+---
+@concept
+## After free, hands off
+Once you free a block, you must not read it, write it, or free it again. All three are undefined behavior. They often seem to work, and then fail somewhere far away.
+---
+@concept
+## Ownership
+C does not track who should free a block. You decide, and you stick to the rule: the **owner** frees it.
 
-On the normal exit path, the database will free every allocation it still owns.
-
+Make it visible in names. If `db_open` allocates, `db_close` frees. When a library function gives you memory, its documentation says who frees it.
 ---
 @quiz
-## What is true after free?
-```c
-free(number);
-```
-- [ ] `number` automatically becomes `NULL`
-- [x] `number` holds an old address that must not be dereferenced
-- [ ] The block remains valid until the function returns
-> `free` releases the block but does not change the pointer variable. Using that old address is undefined behavior.
-
+## What does malloc return when it fails?
+- [ ] 0 bytes of valid memory
+- [x] `NULL`
+- [ ] It crashes the program
+> `malloc` returns `NULL` on failure, so code should check for it.
 ---
-@build
-## Allocate, use, and free
-This complete program gives the allocation one clear owner: `main`.
-
+@quiz
+## What happens here?
 ```c
-#include <stdio.h>
-#include <stdlib.h>
-
-typedef struct {
-  int id;
-} Row;
-
-int main(void) {
-  Row *row = malloc(sizeof *row);
-  if (row == NULL) {
-    fprintf(stderr, "Could not allocate a row.\n");
-    exit(EXIT_FAILURE);
-  }
-
-  row->id = 42;
-  printf("%d\n", row->id);
-
-  free(row);
-  return 0;
-}
+char *p = malloc(10);
+free(p);
+free(p);
 ```
-
-The program initializes the field before reading it and frees the row on normal exit.
+- [ ] The second free is ignored
+- [x] Undefined behavior: it may crash or corrupt memory
+- [ ] The memory is freed twice as fast
+> Only `free(NULL)` is a safe no-op. Freeing the same block twice is a bug.
+---
+@quiz
+## What do you get from `int *p = malloc(4 * sizeof(int));` before you write anything?
+- [ ] Four zeros
+- [x] Four ints with unknown values
+- [ ] `NULL`, until you write to it
+> `malloc` does not clear memory. Use `calloc` when you need zeros.

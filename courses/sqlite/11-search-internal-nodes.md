@@ -1,94 +1,113 @@
 # Search through internal nodes
-requires: c-basics/how-c-becomes-a-program, c-basics/pointers, c-basics/heap-memory, c-basics/arrays-strings-buffers, c-basics/bytes-and-layout
+requires: c-basics/bytes-and-layout
 
 @concept
-## Search asks separators a question
-An internal separator is the maximum key in its left child. Search needs the first separator that is greater than or equal to the target.
-
-If no separator qualifies, search takes the separate right child.
-
+## Walking down
+To find a key, start at the root. At each internal node, pick the child whose range holds the key, and go down into it. Repeat until you reach a leaf, then search the leaf as before.
+---
+@concept
+## Choosing a child
+Take the first key that is greater than or equal to the one you want. Its child is the one to follow. If every key is smaller, follow the right child. This is the same search we use in leaves.
+```diagram
+keys: 7 20
+find 5: child 0
+find 7: child 0
+find 8: child 1
+find 25: child 2, the right child
+```
 ---
 @build
-## Binary-search the separators
-The returned child index can equal the number of keys because an internal node has one more child than key.
-
+## internal_node_find_child
+Put this above `table_find`:
 ```c
-uint32_t internal_child_index(const uint8_t *node, uint32_t key) {
-  uint32_t lower = 0;
-  uint32_t upper = internal_count(node);
-  while (lower < upper) {
-    uint32_t middle = lower + (upper - lower) / 2;
-    if (internal_key(node, middle) >= key) upper = middle;
-    else lower = middle + 1;
+// Returns the index of the child that should hold key.
+uint32_t internal_node_find_child(char *node, uint32_t key) {
+  uint32_t low = 0;
+  uint32_t high = internal_node_num_keys(node);
+  while (low < high) {
+    uint32_t mid = (low + high) / 2;
+    if (internal_node_key(node, mid) < key) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
   }
-  return lower;
+  return low;
 }
 ```
-
+`high` starts at `num_keys`, so the answer can be the right child.
 ---
 @build
-## Resolve the chosen child
-Indexes below the key count use body cells. The final index uses the right-child header field.
-
+## table_find walks the tree
 ```c
-uint32_t internal_child(const uint8_t *node, uint32_t index) {
-  uint32_t count = internal_count(node);
-  if (index > count) {
-    fprintf(stderr, "Internal child index is out of range.\n");
-    exit(EXIT_FAILURE);
+// Finds where key is, or where it would go.
+Cursor table_find(Table *table, uint32_t key) {
+  uint32_t page_num = table->root_page_num;
+  char *node = get_page(&table->pager, page_num);
+  while (get_node_type(node) == NODE_INTERNAL) {
+    uint32_t child_num = internal_node_find_child(node, key);
+    page_num = internal_node_child(node, child_num);
+    node = get_page(&table->pager, page_num);
   }
-  if (index == count) return internal_right_child(node);
-  return read_u32(node,
-      INTERNAL_HEADER_SIZE + index * INTERNAL_CELL_SIZE);
+  return leaf_node_find(table, page_num, key);
 }
 ```
-
+A loop handles any number of levels.
 ---
 @build
-## Descend until a leaf
-The same function handles any future number of internal levels.
-
-```c
-Cursor *internal_find(Table *table, uint32_t page_number, uint32_t key) {
-  uint8_t *node = pager_get_page(table->pager, page_number);
-  uint32_t child_number =
-      internal_child(node, internal_child_index(node, key));
-  uint8_t *child = pager_get_page(table->pager, child_number);
-
-  if (node_type(child) == NODE_LEAF) {
-    return leaf_find(table, child_number, key);
-  }
-  return internal_find(table, child_number, key);
-}
-```
-
+## Remove the insert check
+In `execute_insert`, delete the "Need to implement searching an internal node." check. Inserts now reach the right leaf.
+---
+@concept
+## The next limit
+Now a leaf below the root can fill up. Splitting it means adding a child to its parent, which we have not written yet. For now the program prints "Need to implement updating parent after split." and stops.
 ---
 @build
-## Make table_find dispatch once
-Replace the earlier `table_find` definition with this dispatch. Callers no longer care which node type the root currently has.
-
-```c
-Cursor *table_find(Table *table, uint32_t key) {
-  uint32_t root_number = table->root_page_number;
-  uint8_t *root = pager_get_page(table->pager, root_number);
-  if (node_type(root) == NODE_LEAF) {
-    return leaf_find(table, root_number, key);
-  }
-  return internal_find(table, root_number, key);
-}
+## Run it
+```console
+$ rm -f test.db
+$ cc -Wall -Wextra -o db db.c
+$ for i in $(seq 1 14); do echo "insert $i user$i u$i@example.com"; done > rows.txt
+$ ./db test.db < rows.txt > /dev/null
+$ ./db test.db
+db > insert 15 user15 u15@example.com
+Executed.
+db > insert 3 again again@example.com
+Error: Duplicate key.
+db > .btree
+Tree:
+- internal (size 1)
+  - leaf (size 7)
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+  - key 7
+  - leaf (size 8)
+    - 8
+    - 9
+    - 10
+    - 11
+    - 12
+    - 13
+    - 14
+    - 15
+db > .exit
 ```
-
 ---
 @quiz
-## Separators are 7 and 15. Which child gets key 12?
-- [ ] The child left of 7
-- [x] The child left of 15
-- [ ] The separate right child
-> Fifteen is the first separator greater than or equal to 12.
-
+## An internal node has keys 7 and 20. Which child does key 20 go to?
+- [ ] Child 0
+- [x] Child 1
+- [ ] Child 2, the right child
+> The first key that is at least 20 is 20 itself, at index 1.
 ---
-@concept
-## Search is now depth-independent
-Insert can find the correct leaf through the internal root, and later through more levels. The search interface does not change when the tree becomes taller.
-
-A full non-root leaf still needs its parent updated; that comes after multi-leaf scanning.
+@quiz
+## Why does table_find use a loop instead of one step?
+- [ ] To retry when a read fails
+- [x] The tree can have many levels of internal nodes
+- [ ] To search every leaf
+> It goes down one level per pass until it reaches a leaf.

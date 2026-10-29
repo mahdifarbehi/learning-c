@@ -1,127 +1,167 @@
 # Split full internal nodes
-requires: c-basics/how-c-becomes-a-program, c-basics/pointers, c-basics/heap-memory, c-basics/arrays-strings-buffers, c-basics/bytes-and-layout
+requires: c-basics/how-c-becomes-a-program, c-basics/bytes-and-layout
 
 @concept
-## A parent can overflow too
-Inserting a child into a full internal node divides that node into two siblings. The new sibling is then inserted into the parent above them.
-
-If that parent is full, the same operation repeats upward.
-
----
-@build
-## Mark an absent right child explicitly
-Zero is a valid root page number, so an empty internal node uses a different sentinel.
-
-```c
-#define INVALID_PAGE_NUMBER UINT32_MAX
-
-void initialize_internal(uint8_t *node) {
-  memset(node, 0, PAGE_SIZE);
-  set_node_type(node, NODE_INTERNAL);
-  set_internal_count(node, 0);
-  set_internal_right_child(node, INVALID_PAGE_NUMBER);
-}
+## When the parent is full
+With a fifth child, an internal node has too many. It splits like a leaf: the first 2 children stay, the other 3 move to a new internal node. Then the new node must be added to its own parent.
+```diagram
+full root: 4 children + 1 new
+left: 2 children
+right: 3 children
+new root above both
 ```
-
-`#define` creates a preprocessor constant. Child access treats the sentinel as a fatal corrupt-state error.
-
+---
+@concept
+## Splits travel upward
+Adding the new node to its parent can make that parent split too, and so on up the tree. It stops at a node with room, or at the root, which then gets a new root on top. That is how the tree grows taller.
+---
+@concept
+## Two functions calling each other
+`internal_node_insert` will call `insert_into_parent`, and `insert_into_parent` already calls `internal_node_insert`. Whichever comes first in the file calls a function that is not declared yet. A prototype fixes that.
 ---
 @build
-## Find the real maximum recursively
-An internal node's maximum is inside its rightmost descendant, not necessarily its last stored separator.
-
+## The prototype
+Just above `internal_node_insert`:
 ```c
-uint32_t node_max_key(Pager *pager, const uint8_t *node) {
-  if (node_type(node) == NODE_LEAF) {
-    return leaf_key(node, leaf_count(node) - 1);
+void insert_into_parent(Table *table, uint32_t left_page_num,
+                        uint32_t right_page_num);
+```
+---
+@build
+## Split instead of stopping
+In `internal_node_insert`, replace the "Need to implement splitting internal node." block and the last line with:
+```c
+  if (count <= INTERNAL_MAX_KEYS + 1) {
+    set_internal_node_children(pager, parent_page_num, children, count);
+    return;
   }
-  uint32_t right_number = internal_right_child(node);
-  return node_max_key(pager, pager_get_page(pager, right_number));
+
+  // Too many children: split this node too.
+  uint32_t new_page_num = get_unused_page_num(pager);
+  initialize_internal_node(get_page(pager, new_page_num));
+  uint32_t left_count = count / 2;
+  set_internal_node_children(pager, parent_page_num, children,
+                             left_count);
+  set_internal_node_children(pager, new_page_num, children + left_count,
+                             count - left_count);
+  insert_into_parent(table, parent_page_num, new_page_num);
 }
 ```
-
+`children + left_count` is the address of the first child that moves. `set_internal_node_children` also sets the moved children's parent to the new node.
 ---
 @concept
-## Save facts before moving children
-Before a split, record the old page number, old maximum key, parent page number, and whether the node is the root.
-
-Moving children changes the maximum. Splitting the root also changes which page contains the old node.
-
+## Copying an internal root
+When the root is an internal node and splits, `create_new_root` copies it to a new left page. Its children still say page 0 is their parent, but their parent is now that left page.
 ---
 @build
-## Create the sibling
-For a non-root split, allocate and initialize a new internal page with the same parent.
-
-For a root split, reuse the root-creation operation. It copies the old internal root into a left child and leaves page 0 as the parent of the two halves.
-
-Every child copied into the left internal node has its parent field rewritten to that left page.
-
----
-@build
-## Move the upper half
-Move the old right child first. Then move children from the high end until half the keys remain.
-
+## Fix the children's parent
+In `create_new_root`, after `set_node_root(left, false);`:
 ```c
-uint32_t moved = internal_right_child(old_node);
-internal_insert(table, new_page_number, moved);
-set_node_parent(table, moved, new_page_number);
-set_internal_right_child(old_node, INVALID_PAGE_NUMBER);
-
-for (int index = (int)INTERNAL_MAX_KEYS - 1;
-     index > (int)INTERNAL_MAX_KEYS / 2;
-     index--) {
-  moved = internal_child(old_node, (uint32_t)index);
-  internal_insert(table, new_page_number, moved);
-  set_node_parent(table, moved, new_page_number);
-  set_internal_count(old_node, internal_count(old_node) - 1);
-}
+  if (get_node_type(left) == NODE_INTERNAL) {
+    // Its children still name the root as their parent.
+    for (uint32_t i = 0; i <= internal_node_num_keys(left); i++) {
+      char *child = get_page(pager, internal_node_child(left, i));
+      set_node_parent(child, left_page_num);
+    }
+  }
 ```
-
 ---
 @build
-## Promote the remaining boundary child
-The child beside the middle separator becomes the old node's new right child. Decrease the visible key count once more.
-
-```c
-uint32_t count = internal_count(old_node);
-uint32_t new_right = internal_child(old_node, count - 1);
-set_internal_right_child(old_node, new_right);
-set_internal_count(old_node, count - 1);
+## Run it
+```console
+$ rm -f test.db
+$ cc -Wall -Wextra -o db db.c
+$ for i in $(seq 1 35); do echo "insert $i user$i u$i@example.com"; done > rows.txt
+$ ./db test.db < rows.txt > /dev/null
+$ ./db test.db
+db > .btree
+Tree:
+- internal (size 1)
+  - internal (size 1)
+    - leaf (size 7)
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+    - key 7
+    - leaf (size 7)
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+  - key 14
+  - internal (size 2)
+    - leaf (size 7)
+      - 15
+      - 16
+      - 17
+      - 18
+      - 19
+      - 20
+      - 21
+    - key 21
+    - leaf (size 7)
+      - 22
+      - 23
+      - 24
+      - 25
+      - 26
+      - 27
+      - 28
+    - key 28
+    - leaf (size 7)
+      - 29
+      - 30
+      - 31
+      - 32
+      - 33
+      - 34
+      - 35
+db > .exit
 ```
-
-The unused bytes remain outside the node's live count.
-
+The tree now has three levels.
 ---
 @build
-## Place the incoming child
-Compare its maximum with the old node's new maximum to choose the old or new sibling.
-
-```c
-uint32_t old_new_max = node_max_key(table->pager, old_node);
-uint32_t destination =
-    child_max < old_new_max ? old_page_number : new_page_number;
-internal_insert(table, destination, child_page_number);
-set_node_parent(table, child_page_number, destination);
+## Random order
+Insert 200 ids in random order, then look at the first rows:
+```console
+$ rm -f test.db
+$ for i in $(seq 1 200 | sort -R); do echo "insert $i user$i u$i@example.com"; done > rows.txt
+$ ./db test.db < rows.txt > /dev/null
+$ echo select | ./db test.db | head -n 3
+db > (1, user1, u1@example.com)
+(2, user2, u2@example.com)
+(3, user3, u3@example.com)
 ```
-
+`sort -R` shuffles the lines. With piped input, the prompt is printed but your input is not, so the first row appears right after `db > `.
 ---
-@build
-## Repair the level above
-Replace the old separator using the node's new maximum. If the split node was not the root, insert its new sibling into the existing parent.
-
-That call may find another full node and split again, which is how growth cascades toward the root.
-
+@concept
+## What you built
+A REPL that parses `insert` and `select`, rows packed into bytes, a pager that caches 4096-byte pages from a file, and a B+ tree that keeps rows sorted, finds keys in a few steps, and grows by splitting nodes upward.
 ---
 @quiz
-## What happens when a full root splits?
-- [ ] Every leaf moves down two levels
-- [ ] The root page number changes
-- [x] A new root level is created above the two halves
-> A non-root split adds a sibling at the same depth. A root split creates a new root above both halves.
-
+## The root splits. Which page is the root afterwards?
+- [x] Page 0
+- [ ] The new page
+- [ ] The left copy
+> The root's contents move to a new left page, and page 0 becomes the new root.
 ---
-@build
-## Exercise three levels
-Insert shuffled ids until the small internal-node limit forces an internal split. Verify that `.btree` shows three levels, `select` prints sorted rows, and reopening the file produces the same results.
-
-The database now supports persistent inserts, duplicate detection, ordered scans, leaf splits, and cascading internal splits.
+@quiz
+## An internal node ends up with 5 children. How are they divided?
+- [ ] 1 and 4
+- [x] 2 and 3
+- [ ] 5 and 0
+> `left_count` is 5 / 2 = 2, and the other 3 move to the new node.
+---
+@quiz
+## Why do we need the prototype for insert_into_parent?
+- [ ] It makes the function faster
+- [x] internal_node_insert calls it before its definition in the file
+- [ ] Prototypes are needed for every function
+> C needs a declaration before a call. The two functions call each other, so one of them must be declared first.

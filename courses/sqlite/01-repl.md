@@ -1,118 +1,103 @@
 # Build the REPL
-requires: c-basics/how-c-becomes-a-program, c-basics/pointers, c-basics/heap-memory, c-basics/arrays-strings-buffers
+requires: c-basics/how-c-becomes-a-program, c-basics/pointers, c-basics/heap-memory, c-basics/strings
 
 @concept
-## The first vertical slice
-We will begin with a **REPL**: a read, evaluate, print loop. It prints `db > `, reads one line, handles it, and repeats.
+## What we are building
+A tiny database modeled on SQLite. It has one table of users, each with an id, a username and an email. It supports `insert` and `select`, saves to a file, and stores rows in a B+ tree.
 
-For now, `.exit` ends the program and every other line is rejected.
-
+All the code goes in one file, `db.c`, and it grows one step at a time.
 ---
-@build
-## Keep the input state together
-`getline` needs a pointer and its current capacity. A struct keeps those values with the length returned by the last read.
-
-```c
-typedef struct {
-  char *data;
-  size_t capacity;
-  ssize_t length;
-} InputBuffer;
+@concept
+## A REPL
+Like the SQLite shell, our program is a **REPL**: it reads a line, runs it, prints the result, and loops.
+```diagram
+prompt -> read -> run -> print
+then prompt again
 ```
-
 ---
 @build
-## Create and destroy the buffer
-The constructor checks its allocation. The matching function owns both allocations that may exist later.
-
+## The headers
+Create `db.c` with these headers:
 ```c
-InputBuffer *input_buffer_new(void) {
-  InputBuffer *input = malloc(sizeof *input);
-  if (input == NULL) {
-    fprintf(stderr, "Could not allocate input buffer.\n");
-    exit(EXIT_FAILURE);
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+```
+`stdbool.h` gives us `bool`, `true` and `false`. `stdio.h` has `printf` and `getline`. `stdlib.h` has `free`. `string.h` has `strcmp`.
+---
+@build
+## The loop
+```c
+int main(void) {
+  char *line = NULL;
+  size_t capacity = 0;
+
+  while (true) {
+    printf("db > ");
+    fflush(stdout);
+```
+`line` and `capacity` start empty. `getline` will allocate the buffer. `fflush` shows the prompt now, even though it has no newline.
+---
+@build
+## Read one line
+```c
+    ssize_t length = getline(&line, &capacity, stdin);
+    if (length == -1) {
+      break;
+    }
+    if (line[length - 1] == '\n') {
+      line[length - 1] = '\0';
+    }
+```
+We pass `&line` and `&capacity` so `getline` can replace the buffer with a bigger one. At the end of input it returns -1, and we leave the loop.
+---
+@build
+## Handle the line
+```c
+    if (strcmp(line, ".exit") == 0) {
+      break;
+    }
+    printf("Unrecognized command '%s'.\n", line);
   }
-  input->data = NULL;
-  input->capacity = 0;
-  input->length = 0;
-  return input;
-}
 
-void input_buffer_free(InputBuffer *input) {
-  free(input->data);
-  free(input);
+  free(line);
+  return 0;
 }
 ```
-
+`.exit` leaves the loop. Anything else is unknown for now. After the loop, we free the buffer that `getline` allocated, because it is ours to free.
 ---
 @build
-## Read one complete line
-End-of-file is a normal way to leave the REPL. Any other read failure is fatal.
-
-```c
-bool read_input(InputBuffer *input) {
-  ssize_t length = getline(&input->data, &input->capacity, stdin);
-  if (length < 0) {
-    if (feof(stdin)) return false;
-    fprintf(stderr, "Could not read input.\n");
-    exit(EXIT_FAILURE);
-  }
-
-  if (length > 0 && input->data[length - 1] == '\n') {
-    input->data[--length] = '\0';
-  }
-  input->length = length;
-  return true;
-}
+## Compile and run
+```console
+$ cc -Wall -Wextra -o db db.c
+$ ./db
+db > hello
+Unrecognized command 'hello'.
+db > .exit
 ```
-
 ---
-@build
-## Print the prompt now
-The prompt has no newline, so flush the output stream to make it visible before waiting for input.
-
-```c
-void print_prompt(void) {
-  printf("db > ");
-  if (fflush(stdout) == EOF) {
-    fprintf(stderr, "Could not print prompt.\n");
-    exit(EXIT_FAILURE);
-  }
-}
-```
-
----
-@build
-## The loop owns the buffer
-`main` creates the buffer once and frees it on both normal ways out.
-
-```c
-InputBuffer *input = input_buffer_new();
-for (;;) {
-  print_prompt();
-  if (!read_input(input)) break;
-
-  if (strcmp(input->data, ".exit") == 0) break;
-  printf("Unrecognized command '%s'.\n", input->data);
-}
-input_buffer_free(input);
-```
-
+@concept
+## Two ways out
+Typing `.exit` and pressing Ctrl-D (end of input) both leave the loop. Either way the code after the loop runs, so cleanup always happens.
 ---
 @quiz
-## What happens when the last line has no newline?
-- [ ] Its last real character is deleted
-- [x] The line stays unchanged
-- [ ] `getline` always adds a newline
-> The code removes the final byte only when that byte is actually `\n`.
-
+## You type `.EXIT`. What does the program print?
+- [ ] Nothing, it exits
+- [x] `Unrecognized command '.EXIT'.`
+- [ ] An error from `getline`
+> `strcmp` compares bytes exactly, so case matters.
 ---
-@build
-## Compile and try it
-Include `<stdbool.h>`, `<stdio.h>`, `<stdlib.h>`, `<string.h>`, and `<sys/types.h>`, then compile with:
-
-```sh
-gcc -Wall -Wextra main.c -o db
-```
-
-Try an unknown command, `.exit`, and end-of-file. Each path should finish without leaking the input buffer.
+@quiz
+## Why do we pass `&line` instead of `line` to getline?
+- [ ] To make the call faster
+- [x] So getline can store the address of a new or bigger buffer in `line`
+- [ ] Because `line` starts as `NULL` and `NULL` cannot be passed
+> C passes copies. To change our pointer, getline needs its address.
+---
+@quiz
+## The input ends with a line that has no newline. What does the strip code do with it?
+- [x] Leaves it unchanged
+- [ ] Removes its last character
+- [ ] Crashes
+> We replace the last character only when it is `'\n'`.

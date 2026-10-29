@@ -1,134 +1,116 @@
 # Prepare and execute statements
-requires: c-basics/how-c-becomes-a-program, c-basics/pointers, c-basics/heap-memory, c-basics/arrays-strings-buffers
+requires: c-basics/pointers, c-basics/strings
 
 @concept
-## Split the front end from execution
-The REPL will turn text into a typed statement before it touches stored data.
-
+## Two steps
+SQLite first compiles the SQL text into a program, then runs that program. We do the same on a small scale: **prepare** turns text into a `Statement` struct, and **execute** acts on it.
 ```diagram
-input -> prepare -> Statement -> execute -> result
+text -> prepare -> Statement
+Statement -> execute -> result
 ```
-
-Preparation can reject malformed text. Execution can report database errors.
-
+Parsing stays out of the storage code, and storage stays out of the parser.
+---
+@concept
+## enum names numbers
+```c
+typedef enum { STATEMENT_INSERT, STATEMENT_SELECT } StatementType;
+```
+An `enum` gives names to integer constants: here 0 and 1. It makes code readable, but C does not stop you from storing other numbers in it.
 ---
 @build
-## Name the possible results
-An `enum` creates named integer values. Separate enums keep preparation errors distinct from execution errors.
-
+## The Statement type
+Add this after the headers:
 ```c
 typedef enum { STATEMENT_INSERT, STATEMENT_SELECT } StatementType;
 
-typedef enum {
-  PREPARE_OK,
-  PREPARE_SYNTAX_ERROR,
-  PREPARE_INVALID_ID,
-  PREPARE_TEXT_TOO_LONG,
-  PREPARE_UNKNOWN
-} PrepareResult;
-
-typedef enum { EXECUTE_OK, EXECUTE_DUPLICATE_KEY } ExecuteResult;
-```
-
----
-@build
-## Give a statement storage
-An insert carries a row; a select needs only its type.
-
-```c
-enum { USERNAME_CAPACITY = 33, EMAIL_CAPACITY = 256 };
-
-typedef struct {
-  uint32_t id;
-  char username[USERNAME_CAPACITY];
-  char email[EMAIL_CAPACITY];
-} Row;
-
 typedef struct {
   StatementType type;
-  Row row;
 } Statement;
 ```
-
-The capacities include the terminating zero byte.
-
 ---
 @build
-## Take one token at a time
-This helper replaces a separating space with `\0` and advances the caller's pointer.
-
+## prepare_statement
 ```c
-char *next_token(char **position) {
-  while (**position == ' ') (*position)++;
-  if (**position == '\0') return NULL;
-
-  char *token = *position;
-  while (**position != '\0' && **position != ' ') (*position)++;
-  if (**position == ' ') {
-    **position = '\0';
-    (*position)++;
+// Returns NULL on success, or an error message.
+const char *prepare_statement(const char *input, Statement *statement) {
+  if (strncmp(input, "insert", 6) == 0) {
+    statement->type = STATEMENT_INSERT;
+    return NULL;
   }
-  return token;
+  if (strcmp(input, "select") == 0) {
+    statement->type = STATEMENT_SELECT;
+    return NULL;
+  }
+  return "Unrecognized statement.";
 }
 ```
-
-The input buffer is intentionally changed into separate strings.
-
+`insert` uses `strncmp` because it will be followed by values. `select` must match exactly.
+---
+@concept
+## Returning an error message
+`prepare_statement` returns `NULL` when all is well, or a message when it is not. The messages are string literals, so they stay valid after the function returns. The return type is `const char *` because nobody may change them.
 ---
 @build
-## Convert the id with checks
-`strtoul` converts text to an unsigned long and reports where conversion stopped.
-
+## execute_statement
 ```c
-char *end = NULL;
-errno = 0;
-unsigned long parsed = strtoul(id_text, &end, 10);
-if (errno != 0 || *id_text == '\0' || *end != '\0' ||
-    parsed > UINT32_MAX) {
-  return PREPARE_INVALID_ID;
+void execute_statement(const Statement *statement) {
+  if (statement->type == STATEMENT_INSERT) {
+    printf("This is where we would do an insert.\n");
+  } else {
+    printf("This is where we would do a select.\n");
+  }
 }
-statement->row.id = (uint32_t)parsed;
 ```
-
-Include `<errno.h>` and `<stdint.h>` for the error value and limit.
-
+For now it only says what it would do.
 ---
 @build
-## Copy only text that fits
-Check the lengths before copying the strings, including their terminators.
-
+## Commands and statements
+In `main`, replace the line that prints "Unrecognized command" with:
 ```c
-size_t username_length = strlen(username);
-size_t email_length = strlen(email);
-if (username_length >= sizeof statement->row.username ||
-    email_length >= sizeof statement->row.email) {
-  return PREPARE_TEXT_TOO_LONG;
-}
+    if (line[0] == '.') {
+      printf("Unrecognized command '%s'.\n", line);
+      continue;
+    }
 
-memcpy(statement->row.username, username, username_length + 1);
-memcpy(statement->row.email, email, email_length + 1);
+    Statement statement;
+    const char *error = prepare_statement(line, &statement);
+    if (error != NULL) {
+      printf("%s\n", error);
+      continue;
+    }
+    execute_statement(&statement);
+    printf("Executed.\n");
 ```
-
+Lines starting with `.` are commands for the program. Everything else is a statement.
 ---
 @build
-## Recognize the two statements
-`prepare_statement` accepts exactly `select` or `insert ID USER EMAIL`. It rejects missing and extra tokens.
-
-```c
-Statement statement = {0};
-PrepareResult result = prepare_statement(input->data, &statement);
-if (result == PREPARE_OK) {
-  ExecuteResult executed = execute_statement(&statement);
-  if (executed == EXECUTE_OK) printf("Executed.\n");
-}
+## Run it
+```console
+$ cc -Wall -Wextra -o db db.c
+$ ./db
+db > insert foo bar
+This is where we would do an insert.
+Executed.
+db > select
+This is where we would do a select.
+Executed.
+db > delete
+Unrecognized statement.
+db > .tables
+Unrecognized command '.tables'.
+db > .exit
 ```
-
-The zero initializer gives every byte of the statement a known value.
-
 ---
 @quiz
-## What happens with `insert 12x ada a@b`?
-- [ ] The id becomes 12
-- [x] Preparation returns `PREPARE_INVALID_ID`
-- [ ] The program stores the text `12x` as the id
-> `strtoul` stops at `x`, and the check requires the conversion to consume the whole token.
+## You type `insertxyz`. What prints?
+- [ ] `Unrecognized statement.`
+- [x] `This is where we would do an insert.` and then `Executed.`
+- [ ] `Unrecognized command 'insertxyz'.`
+> `strncmp` checks only the first 6 characters, and they are "insert".
+---
+@quiz
+## You type `select *`. What prints?
+- [ ] `This is where we would do a select.`
+- [x] `Unrecognized statement.`
+- [ ] `Unrecognized command 'select *'.`
+> `strcmp` needs the whole line to be exactly "select".

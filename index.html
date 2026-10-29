@@ -2,15 +2,420 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="0; url=C%20Stories.html">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>C Stories</title>
-<link rel="canonical" href="C%20Stories.html">
-<script>
-location.replace('C%20Stories.html' + location.search + location.hash);
-</script>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+:root{
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#0f1115;--fg:#f3f1ec;--muted:#a09d96;--code:#0a0c10;--bar:rgba(255,255,255,.22);
+  --concept:#3b2a6b;--concept2:#1b1440;--build:#0f4a3f;--build2:#08241f;--quiz:#5c3d0c;--quiz2:#261806;--accent:#ffd166;
+}
+*{box-sizing:inherit}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#f4efe6;--fg:#1d1b18;--muted:#6b665d;--code:#14161b;--bar:rgba(0,0,0,.2);
+  --concept:#d9ccff;--concept2:#efe9ff;--build:#bfeadc;--build2:#e6f7f0;--quiz:#ffe2a8;--quiz2:#fff3d9;--accent:#b4570a;}}
+:root[data-theme="dark"]{--bg:#0f1115;--fg:#f3f1ec}
+html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
+body{margin:0;height:100%;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif;display:flex;justify-content:center}
+button{font:inherit}
+#app{position:relative;width:100%;max-width:440px;height:100%;overflow:hidden}
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:32px 28px}
+.list-screen{justify-content:flex-start;overflow-y:auto;padding-top:calc(42px + env(safe-area-inset-top,0px));padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))}
+h1,h2{font-family:Georgia,serif;margin:0 0 16px;line-height:1.15}
+h1{font-size:2.2rem}h2{font-size:1.9rem}
+p{font-size:1.13rem;line-height:1.55;margin:0 0 14px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+p code{background:rgba(127,127,127,.22);padding:1px 6px;border-radius:5px;font-size:.95em}
+pre{background:var(--code);color:#e8e6e1;border-radius:14px;padding:16px;margin:6px 0 14px;overflow-x:auto;font-size:.9rem;line-height:1.5;user-select:text;-webkit-user-select:text}
+pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-align:center;font-size:1rem}
+.btn{display:block;width:100%;font-weight:600;padding:14px 18px;border-radius:12px;border:0;background:var(--accent);color:#14110a;cursor:pointer;margin-top:10px;text-align:center;text-decoration:none}
+.btn.alt{background:transparent;color:var(--fg);border:1px solid var(--muted)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.muted{color:var(--muted);font-size:.93rem}
+.eyebrow{font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:8px}
+.course-list,.lesson-list,.prereq-list{display:flex;flex-direction:column;gap:10px;margin:8px 0 20px}
+.course,.lesson-link,.prereq-link{width:100%;border:1px solid rgba(160,157,150,.45);border-radius:14px;padding:15px 16px;background:rgba(127,127,127,.08);color:var(--fg);text-align:left;cursor:pointer}
+.course strong,.lesson-link strong,.prereq-link strong{display:block;font-size:1.05rem;margin-bottom:4px}
+.course span,.lesson-link span,.prereq-link span{display:block;color:var(--muted);font-size:.86rem;line-height:1.35}
+.lesson-link.done,.prereq-link.done{border-color:#4cc38a}
+.screen-back{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:16px;background:none;border:0;color:var(--fg);padding:8px 10px;cursor:pointer;font-size:1rem}
+.credit{border-top:1px solid rgba(160,157,150,.3);padding-top:14px;margin-top:4px}
+#story{display:none}
+#story .stage{overflow-y:auto}
+#story.quiz .stage{background:linear-gradient(160deg,var(--quiz),var(--quiz2))}
+#opts{display:flex;flex-direction:column;gap:10px;margin:8px 0}
+.opt{font-weight:600;text-align:left;padding:14px 16px;border-radius:12px;border:1px solid var(--muted);background:rgba(127,127,127,.12);color:var(--fg);cursor:pointer}
+.opt.ok{border-color:#4cc38a;background:rgba(76,195,138,.28)}
+.opt.bad{border-color:#e5484d;background:rgba(229,72,77,.24)}
+#fb p{margin-top:14px;font-size:1.05rem}
+#story .stage{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:84px 28px 56px;transition:background .3s;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+#story.concept .stage{background:linear-gradient(160deg,var(--concept),var(--concept2))}
+#story.build .stage{background:linear-gradient(160deg,var(--build),var(--build2))}
+#bars{position:absolute;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));display:flex;gap:4px;z-index:5}
+#bars div{flex:1;height:3px;background:var(--bar);border-radius:2px;overflow:hidden}
+#bars i{display:block;height:100%;width:0;background:var(--fg)}
+#tag{position:absolute;top:calc(28px + env(safe-area-inset-top,0px));left:20px;z-index:5;font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600}
+#close{position:absolute;top:calc(22px + env(safe-area-inset-top,0px));right:14px;z-index:6;background:none;border:0;color:var(--fg);font-size:1.6rem;cursor:pointer}
+#hint{position:absolute;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:0;right:0;text-align:center;font-size:.78rem;color:var(--muted)}
+</style>
 </head>
 <body>
-<p><a href="C%20Stories.html">Open C Stories</a></p>
+<div id="app">
+  <main class="screen list-screen" id="home">
+    <p class="eyebrow">Learn by building</p>
+    <h1>C Stories</h1>
+    <p>Short lessons you move through by hand. Tap right for next and left for back.</p>
+    <div class="course-list" id="courses"></div>
+    <button class="btn alt" id="pick">Open a .md lesson file</button>
+    <input type="file" id="file" accept=".md,.markdown,.txt" hidden>
+    <p class="muted" id="offline" style="margin-top:14px">Progress stays on this device.</p>
+  </main>
+
+  <section class="screen list-screen" id="course" style="display:none">
+    <button class="screen-back" id="courseBack" aria-label="Back to courses">← Courses</button>
+    <p class="eyebrow" id="courseProgress"></p>
+    <h1 id="courseTitle"></h1>
+    <p id="courseDescription"></p>
+    <p class="muted credit">Based on <em>Let's Build a Simple Database</em> by cstack. Rewritten for C Stories.</p>
+    <div class="lesson-list" id="lessons"></div>
+  </section>
+
+  <section class="screen list-screen" id="prereqs" style="display:none">
+    <button class="screen-back" id="prereqBack" aria-label="Back to course">← Lessons</button>
+    <p class="eyebrow">Before this lesson</p>
+    <h1>Take these first</h1>
+    <p id="prereqIntro"></p>
+    <div class="prereq-list" id="prereqList"></div>
+    <button class="btn" id="startPending">Start SQLite lesson</button>
+  </section>
+
+  <section class="screen" id="done" style="display:none">
+    <h1>Lesson complete ✓</h1>
+    <p class="muted" id="doneTitle"></p>
+    <button class="btn" id="replay">Replay</button>
+    <button class="btn alt" id="doneBack">Back to lessons</button>
+  </section>
+
+  <div id="story">
+    <div id="bars"></div><div id="tag"></div><button id="close" aria-label="Close">×</button>
+    <div class="stage" id="stage"></div>
+    <div id="hint">tap left or right</div>
+  </div>
+</div>
+<script>
+const COURSES = {
+  basics: {
+    title: 'C Basics',
+    description: 'The C-specific ideas you need before building the database.',
+    lessons: [
+      ['c-basics/how-c-becomes-a-program', 'How C becomes a program', 'courses/c-basics/01-how-c-becomes-a-program.md'],
+      ['c-basics/pointers', 'Pointers, structs, and function arguments', 'courses/c-basics/02-pointers.md'],
+      ['c-basics/heap-memory', 'Heap memory and ownership', 'courses/c-basics/03-heap-memory.md'],
+      ['c-basics/strings', 'Strings and buffers', 'courses/c-basics/04-strings.md'],
+      ['c-basics/bytes-and-layout', 'Bytes, offsets, and data layout', 'courses/c-basics/05-bytes-and-layout.md'],
+      ['c-basics/file-descriptors', 'Files and file descriptors', 'courses/c-basics/06-file-descriptors.md']
+    ]
+  },
+  sqlite: {
+    title: 'Build SQLite',
+    description: 'Build a small persistent database, then grow its storage into a B+ tree.',
+    lessons: [
+      ['sqlite/repl', 'Build the REPL', 'courses/sqlite/01-repl.md'],
+      ['sqlite/prepare-and-execute', 'Prepare and execute statements', 'courses/sqlite/02-prepare-and-execute.md'],
+      ['sqlite/parse-insert', 'Parse an insert', 'courses/sqlite/03-parse-insert.md'],
+      ['sqlite/rows-in-pages', 'Store rows in pages', 'courses/sqlite/04-rows-in-pages.md'],
+      ['sqlite/save-to-disk', 'Save pages to a file', 'courses/sqlite/05-save-to-disk.md'],
+      ['sqlite/cursors', 'Add a cursor', 'courses/sqlite/06-cursors.md'],
+      ['sqlite/btree-shape', 'Choose a B+ tree', 'courses/sqlite/07-btree-shape.md'],
+      ['sqlite/leaf-nodes', 'Lay out a leaf node', 'courses/sqlite/08-leaf-nodes.md'],
+      ['sqlite/sorted-leaf', 'Keep the leaf sorted', 'courses/sqlite/09-sorted-leaf.md'],
+      ['sqlite/split-leaves', 'Split a full leaf', 'courses/sqlite/10-split-leaves.md'],
+      ['sqlite/search-internal-nodes', 'Search through internal nodes', 'courses/sqlite/11-search-internal-nodes.md'],
+      ['sqlite/scan-multiple-leaves', 'Scan across leaves', 'courses/sqlite/12-scan-multiple-leaves.md'],
+      ['sqlite/update-parent-nodes', 'Update a parent after a split', 'courses/sqlite/13-update-parent-nodes.md'],
+      ['sqlite/split-internal-nodes', 'Split full internal nodes', 'courses/sqlite/14-split-internal-nodes.md']
+    ]
+  }
+};
+
+const lessonBySlug = new Map();
+for (const [courseId, course] of Object.entries(COURSES)) {
+  course.lessons = course.lessons.map(([slug,title,path])=>({slug,title,path,courseId}));
+  course.lessons.forEach(item=>lessonBySlug.set(item.slug,item));
+}
+
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const inline=s=>esc(s).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+const progressKey=path=>'cstories:lesson:'+path;
+const loadProgress=path=>{try{return JSON.parse(localStorage.getItem(progressKey(path)))||null;}catch{return null;}};
+const saveProgress=(path,value)=>{try{localStorage.setItem(progressKey(path),JSON.stringify(value));}catch{}};
+const isComplete=item=>Boolean(loadProgress(item.path)?.done);
+
+function body(markdown){
+  let out='',fence='',buffer=[];
+  const flush=()=>{if(buffer.length){out+='<p>'+inline(buffer.join(' '))+'</p>';buffer=[];}};
+  for(const line of markdown.split('\n')){
+    const marker=line.match(/^```([A-Za-z0-9_-]*)\s*$/);
+    if(marker){
+      if(fence){out+=fence==='diagram'?'</pre>':'</code></pre>';fence='';}
+      else{
+        flush();fence=marker[1]||'code';
+        out+=fence==='diagram'?'<pre class="diagram" aria-label="Diagram">':'<pre><code>';
+      }
+      continue;
+    }
+    if(fence){out+=esc(line)+'\n';continue;}
+    if(!line.trim()){flush();continue;}
+    buffer.push(line);
+  }
+  flush();
+  if(fence)out+=fence==='diagram'?'</pre>':'</code></pre>';
+  return out;
+}
+
+function parse(markdown){
+  let title='Lesson',requires=[];
+  markdown=markdown.replace(/^\s*# (.+)\n/,(match,value)=>{title=value.trim();return '';});
+  markdown=markdown.replace(/^requires:\s*(.+)\n/,(match,value)=>{requires=value.split(',').map(s=>s.trim()).filter(Boolean);return '';});
+  const cards=markdown.split(/^---\s*$/m).map(card=>card.trim()).filter(Boolean).map(card=>{
+    const lines=card.split('\n');let tag='concept',heading='';
+    while(lines.length){
+      const line=lines[0].trim();
+      if(line.startsWith('@')){tag=line.slice(1).trim();lines.shift();}
+      else if(line.startsWith('## ')){heading=line.slice(3).trim();lines.shift();}
+      else if(!line){lines.shift();}
+      else break;
+    }
+    const text=lines.join('\n');
+    if(tag==='quiz'){
+      const options=[],prose=[];let explanation='';
+      for(const line of text.split('\n')){
+        const option=line.match(/^- \[( |x)\] (.+)$/);
+        if(option)options.push({text:option[2],correct:option[1]==='x'});
+        else if(line.startsWith('> '))explanation+=line.slice(2)+' ';
+        else prose.push(line);
+      }
+      return {tag:'quiz',heading,html:body(prose.join('\n')),quiz:{options,explanation:explanation.trim()}};
+    }
+    return {tag:tag==='build'?'build':'concept',heading,html:body(text)};
+  });
+  return {title,requires,cards};
+}
+
+function show(id){
+  ['home','course','prereqs','done','story'].forEach(name=>{
+    $(name).style.display=name===id?(name==='story'?'block':'flex'):'none';
+  });
+}
+
+function courseCounts(course){
+  const done=course.lessons.filter(isComplete).length;
+  return `${done}/${course.lessons.length} lessons complete`;
+}
+
+function renderHome(){
+  $('courses').innerHTML='';
+  for(const [id,course] of Object.entries(COURSES)){
+    const button=document.createElement('button');
+    button.className='course';
+    button.innerHTML=`<strong>${inline(course.title)}</strong><span>${inline(courseCounts(course))}</span>`;
+    button.onclick=()=>renderCourse(id);
+    $('courses').appendChild(button);
+  }
+  show('home');
+}
+
+let selectedCourseId='basics';
+function renderCourse(courseId){
+  selectedCourseId=courseId;
+  const course=COURSES[courseId];
+  $('courseTitle').textContent=course.title;
+  $('courseDescription').textContent=course.description;
+  $('courseProgress').textContent=courseCounts(course);
+  $('lessons').innerHTML='';
+  course.lessons.forEach((item,index)=>{
+    const progress=loadProgress(item.path);
+    const button=document.createElement('button');
+    button.className='lesson-link'+(progress?.done?' done':'');
+    const state=progress?.done?'Completed ✓':progress&&progress.card>0?`Resume at card ${progress.card+1}`:'Not started';
+    button.innerHTML=`<strong>${index+1}. ${inline(item.title)}</strong><span>${state}</span>`;
+    button.onclick=()=>selectLesson(item);
+    $('lessons').appendChild(button);
+  });
+  show('course');
+}
+
+let pending=null;
+async function fetchLesson(item){
+  const response=await fetch(item.path);
+  if(!response.ok)throw new Error(`Could not load ${item.path}`);
+  return response.text();
+}
+
+async function selectLesson(item){
+  try{
+    const markdown=await fetchLesson(item);
+    const parsed=parse(markdown);
+    if(item.courseId==='sqlite'){
+      pending={item,markdown,parsed};
+      renderPrerequisites();
+      return;
+    }
+    beginLesson(item,markdown,{type:'course',courseId:item.courseId});
+  }catch(error){
+    alert(error.message);
+  }
+}
+
+function renderPrerequisites(){
+  const required=pending.parsed.requires.map(slug=>lessonBySlug.get(slug)).filter(Boolean);
+  const missing=required.filter(item=>!isComplete(item));
+  $('prereqIntro').textContent=missing.length
+    ? `Complete ${missing.length} prerequisite lesson${missing.length===1?'':'s'} before “${pending.item.title}”.`
+    : `You are ready for “${pending.item.title}”. Review any prerequisite if you want.`;
+  $('prereqList').innerHTML='';
+  required.forEach(item=>{
+    const done=isComplete(item);
+    const button=document.createElement('button');
+    button.className='prereq-link'+(done?' done':'');
+    button.innerHTML=`<strong>${inline(item.title)}</strong><span>${done?'Completed ✓':'Take this lesson'}</span>`;
+    button.onclick=async()=>{
+      try{beginLesson(item,await fetchLesson(item),{type:'prereqs'});}catch(error){alert(error.message);}
+    };
+    $('prereqList').appendChild(button);
+  });
+  $('startPending').disabled=missing.length>0;
+  $('startPending').textContent=missing.length?'Finish prerequisites first':'Start SQLite lesson';
+  show('prereqs');
+}
+
+let lesson=null,currentItem=null,currentMarkdown='',returnTarget={type:'home'};
+let cardIndex=0,answered=false,score=0,total=0;
+
+function beginLesson(item,markdown,target){
+  lesson=parse(markdown);
+  if(!lesson.cards.length)return;
+  currentItem=item;
+  currentMarkdown=markdown;
+  returnTarget=target;
+  score=0;total=0;
+  const progress=item?.path?loadProgress(item.path):null;
+  const startAt=progress&&!progress.done?progress.card||0:0;
+  $('bars').innerHTML=lesson.cards.map(()=>'<div><i></i></div>').join('');
+  show('story');
+  go(startAt);
+}
+
+function persist(done=false){
+  if(currentItem?.path){
+    const previous=loadProgress(currentItem.path);
+    saveProgress(currentItem.path,{card:done?0:cardIndex,done:done||Boolean(previous?.done)});
+  }
+}
+
+function go(next){
+  if(next<0)next=0;
+  if(next>=lesson.cards.length){
+    persist(true);
+    $('doneTitle').textContent=lesson.title+(total?` · Quiz ${score}/${total}`:'');
+    show('done');return;
+  }
+  cardIndex=next;
+  const card=lesson.cards[cardIndex];
+  $('story').className=card.tag;
+  $('tag').textContent=({build:'Build',quiz:'Quiz'}[card.tag]||'Concept')+` · ${cardIndex+1}/${lesson.cards.length}`;
+  answered=false;
+  $('stage').innerHTML=(card.heading?`<h2>${inline(card.heading)}</h2>`:'')+card.html+
+    (card.quiz?`<div id="opts">${card.quiz.options.map((option,index)=>`<button class="opt" data-index="${index}">${inline(option.text)}</button>`).join('')}</div><div id="fb"></div>`:'');
+  $('stage').scrollTop=0;
+  if(card.quiz)document.querySelectorAll('.opt').forEach(button=>button.onclick=()=>answer(Number(button.dataset.index)));
+  [...$('bars').children].forEach((bar,index)=>bar.firstChild.style.width=index<cardIndex?'100%':'0');
+  persist(false);
+}
+
+function answer(index){
+  if(answered)return;
+  answered=true;const quiz=lesson.cards[cardIndex].quiz;total++;
+  if(quiz.options[index].correct)score++;
+  document.querySelectorAll('.opt').forEach((button,buttonIndex)=>{
+    button.disabled=true;
+    if(quiz.options[buttonIndex].correct)button.classList.add('ok');
+    else if(buttonIndex===index)button.classList.add('bad');
+  });
+  $('fb').innerHTML=`<p>${quiz.options[index].correct?'Correct. ':'Not quite. '}${inline(quiz.explanation)}</p><button class="btn next">Continue</button>`;
+  $('fb').querySelector('.next').onclick=()=>go(cardIndex+1);
+  $('bars').children[cardIndex].firstChild.style.width='100%';
+}
+
+function leaveStory(){
+  if(returnTarget.type==='prereqs'&&pending)renderPrerequisites();
+  else if(returnTarget.type==='course')renderCourse(returnTarget.courseId);
+  else renderHome();
+}
+
+const stage=$('stage');
+let pointerDownAt=0,pointerStartX=0,pointerStartY=0,pointerActive=false;
+stage.addEventListener('pointerdown',event=>{
+  pointerActive=true;
+  pointerDownAt=performance.now();
+  pointerStartX=event.clientX;
+  pointerStartY=event.clientY;
+});
+stage.addEventListener('pointerup',event=>{
+  if(!pointerActive)return;
+  pointerActive=false;
+  const moved=Math.hypot(event.clientX-pointerStartX,event.clientY-pointerStartY);
+  if(!event.target.closest('button')&&performance.now()-pointerDownAt<300&&moved<12){
+    const bounds=stage.getBoundingClientRect();
+    const forward=(event.clientX-bounds.left)>=bounds.width*.35;
+    if(forward&&lesson.cards[cardIndex].quiz&&!answered)return;
+    go(forward?cardIndex+1:cardIndex-1);
+  }
+});
+stage.addEventListener('pointercancel',()=>{pointerActive=false;});
+document.addEventListener('keydown',event=>{
+  if($('story').style.display!=='block')return;
+  if((event.key==='ArrowRight'||event.key===' ')&&!(lesson.cards[cardIndex].quiz&&!answered))go(cardIndex+1);
+  if(event.key==='ArrowLeft')go(cardIndex-1);
+  if(event.key==='Escape')leaveStory();
+});
+
+$('courseBack').onclick=renderHome;
+$('prereqBack').onclick=()=>renderCourse('sqlite');
+$('startPending').onclick=()=>{
+  if(!pending)return;
+  const request=pending;pending=null;
+  beginLesson(request.item,request.markdown,{type:'course',courseId:'sqlite'});
+};
+$('close').onclick=leaveStory;
+$('replay').onclick=()=>{score=0;total=0;show('story');go(0);};
+$('doneBack').onclick=leaveStory;
+$('pick').onclick=()=>$('file').click();
+$('file').onchange=async event=>{
+  const file=event.target.files[0];
+  if(file){
+    currentItem=null;
+    beginLesson(null,await file.text(),{type:'home'});
+    event.target.value='';
+  }
+};
+addEventListener('dragover',event=>event.preventDefault());
+addEventListener('drop',async event=>{
+  event.preventDefault();
+  const file=event.dataTransfer.files[0];
+  if(file)beginLesson(null,await file.text(),{type:'home'});
+});
+
+if('serviceWorker' in navigator){
+  addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+renderHome();
+</script>
 </body>
 </html>

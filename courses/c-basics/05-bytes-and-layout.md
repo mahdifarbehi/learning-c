@@ -1,191 +1,110 @@
 # Bytes, offsets, and data layout
 
 @concept
-## A database page is raw storage
-The database stores rows inside page-sized byte arrays. It decides which bytes hold each field instead of asking C to save a struct directly.
+## sizeof counts bytes
+`sizeof(x)` or `sizeof(Type)` is the number of bytes something takes. The compiler works it out, so it costs nothing at run time. The result has type `size_t`, an unsigned integer.
 
-This makes the page layout explicit: the code computes every field's size and offset.
-
+`sizeof(char)` is always 1.
 ---
 @concept
-## Fixed-width integers state their size
-`<stdint.h>` provides integer types with exact widths. `uint32_t` is an unsigned integer containing 32 bits.
+## Exact-size integers
+How big an `int` is depends on the machine. It is usually 4 bytes, but C only promises at least 2.
 
+`<stdint.h>` has types with exact sizes: `uint8_t` is 1 byte (0 to 255), and `uint32_t` is 4 bytes (0 to 4294967295). Use them for anything you store in a file.
+---
+@concept
+## Unsigned numbers wrap around
 ```c
-#include <stdint.h>
-#include <stdio.h>
-
-uint32_t id = 42;
-printf("%u\n", (unsigned)id);
+uint32_t n = 0;
+n = n - 1;  // 4294967295
 ```
-
-The cast gives `printf` the `unsigned int` expected by `%u`.
-
+Unsigned arithmetic never goes negative. It wraps around. Watch out for `n - 1` when `n` can be 0.
 ---
 @concept
-## Sizes use size_t
-`size_t` is the unsigned type used for object sizes and array capacities. Print it with `%zu`.
-
-`ssize_t` is its signed counterpart in the interfaces used here, allowing `-1` to report failure.
-
-```c
-#include <stdio.h>
-#include <sys/types.h>
-
-size_t page_size = 4096;
-printf("%zu\n", page_size);
-```
-
----
-@concept
-## sizeof measures storage
-`sizeof` reports how many bytes a type or object occupies. Its result has type `size_t`.
-
-```c
-size_t id_size = sizeof(uint32_t);
-size_t row_size = sizeof row;
-```
-
-The operand in `sizeof row` is not evaluated.
-
----
-@concept
-## Structs may contain padding
-**Alignment** is a requirement that some values begin at particular address boundaries. The compiler may leave unused padding bytes between struct fields to meet it, so `sizeof` a struct may exceed the sum of its field sizes.
-
+## Structs contain padding
 ```c
 typedef struct {
-  char tag;
   uint32_t id;
-} TaggedId;
+  char name[33];
+} Row;
 ```
+The fields add up to 37 bytes, but `sizeof(Row)` is 40. The compiler adds **padding** so that fields sit at addresses the CPU reads quickly.
 
-That is why the database writes individual fields into a raw byte layout instead of copying the struct as its file format.
-
+You do not control padding. So to store a struct in a file, copy each field to an offset you choose.
 ---
 @concept
-## uint8_t pointers move by bytes
-`uint8_t` is an unsigned 8-bit integer type. A `uint8_t *` gives the database a typed way to address individual bytes.
-
+## char * moves by bytes
+A `char *` points at one byte. Adding `n` moves it `n` bytes:
 ```c
-uint8_t *bytes = page;
-uint8_t *fifth_byte = bytes + 4;
+char *page = buffer;
+char *field = page + 37;  // 37 bytes in
 ```
-
-Adding `4` moves from byte offset 0 to byte offset 4.
-
+Pointer arithmetic counts in elements of the pointed-at type. A `uint32_t *` plus 1 moves 4 bytes. To move by bytes, use `char *`.
 ---
 @concept
-## Pointer arithmetic scales by type
-Adding one to a pointer moves by the size of the pointed-to type.
+## memcpy copies bytes
+```c
+memcpy(destination, source, n);
+```
+`memcpy` copies `n` bytes from one address to another, whatever they hold. It comes from `<string.h>`.
 
+The two areas must not overlap.
+---
+@concept
+## memmove handles overlap
+To shift bytes inside one buffer, use `memmove`. It copies correctly even when the source and destination overlap.
+```c
+char s[] = "abcd";
+memmove(s + 1, s, 3);  // s is now "aabc"
+```
 ```diagram
-uint8_t pointer + 1  -> next byte
-uint32_t pointer + 1 -> next uint32_t
+before: a b c d
+after: a a b c
 ```
-
-Use a `uint8_t *` when an offset is measured in bytes.
-
 ---
 @concept
-## Derive offsets from earlier fields
-An **offset** is a field's distance in bytes from the start of a record. Derive each offset from the field before it.
+## Read numbers out of bytes with memcpy
+To read a `uint32_t` at some byte offset, do not cast the `char *` to `uint32_t *` and read through it. The address may not be suitably aligned, and C's rules on mixing pointer types make that undefined behavior.
 
+Copy the bytes into a real variable instead:
 ```c
-static const size_t ID_OFFSET = 0;
-static const size_t USERNAME_OFFSET = ID_OFFSET + sizeof(uint32_t);
-```
-
-At file scope, `static` keeps these names inside this source file. Changing the first field's size updates the next field's offset from the same calculation.
-
----
-@concept
-## Write an integer with memcpy
-`memcpy` copies a stated number of bytes between regions that do not overlap.
-
-```c
-#include <stdint.h>
-#include <stddef.h>
-#include <string.h>
-
-void write_u32(uint8_t *page, size_t offset, uint32_t value) {
-  memcpy(page + offset, &value, sizeof value);
-}
-```
-
-`page + offset` is byte arithmetic because `page` points to `uint8_t`.
-
----
-@concept
-## Read an integer with memcpy
-Copy bytes into a real `uint32_t` object before returning the value.
-
-```c
-uint32_t read_u32(const uint8_t *page, size_t offset) {
+uint32_t read_u32(const char *bytes) {
   uint32_t value;
-  memcpy(&value, page + offset, sizeof value);
+  memcpy(&value, bytes, 4);
   return value;
 }
 ```
-
-The copy initializes every byte of `value` before it is read.
-
----
-@build
-## Serialize one row
-**Serialization** turns a value into the bytes chosen for storage.
-
-```c
-typedef struct {
-  uint32_t id;
-  char username[32];
-} Row;
-
-void serialize_row(const Row *row, uint8_t *destination) {
-  memcpy(destination + ID_OFFSET, &row->id, sizeof row->id);
-  memcpy(destination + USERNAME_OFFSET,
-         row->username,
-         sizeof row->username);
-}
-```
-
-This continues with the offsets from the earlier card. The caller provides enough destination space and an initialized `Row`.
-
----
-@build
-## Deserialize one row
-**Deserialization** reconstructs a value from stored bytes.
-
-```c
-void deserialize_row(const uint8_t *source, Row *row) {
-  memcpy(&row->id, source + ID_OFFSET, sizeof row->id);
-  memcpy(row->username,
-         source + USERNAME_OFFSET,
-         sizeof row->username);
-}
-```
-
-Using the same offsets in both directions makes the layout reversible.
-
----
-@concept
-## Overlap requires memmove
-`memcpy` requires separate source and destination regions. `memmove` is the byte-copying function to use when the regions might overlap.
-
-```c
-memmove(cells + cell_size, cells, used_bytes);
-```
-
-This can shift existing cells right within one page without reading bytes after they have been overwritten.
-
+Compilers turn this into a single load.
 ---
 @quiz
-## How far does each expression move?
+## `uint32_t *p` holds address 100. Which address does `p + 2` hold?
+- [ ] 102
+- [x] 108
+- [ ] 200
+> Each step moves one `uint32_t`, which is 4 bytes.
+---
+@quiz
+## What does this print?
 ```c
-uint8_t *byte_pointer = page;
-uint32_t *integer_pointer = values;
+uint32_t n = 0;
+n = n - 1;
+printf("%u\n", n);
 ```
-- [ ] Both `byte_pointer + 1` and `integer_pointer + 1` move one byte
-- [x] The first moves one byte; the second moves by `sizeof(uint32_t)`
-- [ ] Both move by `sizeof(uint32_t)`
-> Pointer arithmetic is scaled by the pointed-to type, which is why byte offsets use `uint8_t *`.
+- [ ] -1
+- [ ] 0
+- [x] 4294967295
+> Unsigned arithmetic wraps around to the largest value.
+---
+@quiz
+## A struct has a `uint32_t` and a `char[33]`. Why can its sizeof be 40?
+- [ ] The compiler adds a hidden length field
+- [x] The compiler adds padding for alignment
+- [ ] `sizeof` rounds up to a multiple of 10
+> Padding keeps fields aligned. That is why we choose our own byte layout for files.
+---
+@quiz
+## You need to shift bytes one place to the right inside the same buffer. Which call is safe?
+- [ ] `memcpy`
+- [x] `memmove`
+- [ ] `strcpy`
+> The source and destination overlap, and only `memmove` handles that.
