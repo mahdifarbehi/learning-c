@@ -2,6 +2,7 @@
   "name": "C Stories",
   "short_name": "C Stories",
   "description": "Short story-style lessons on how C works.",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

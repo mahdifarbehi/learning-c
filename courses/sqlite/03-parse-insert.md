@@ -47,14 +47,20 @@ insert\0 1\0 alice\0 a@b.c
 const char *prepare_insert(char *input, Statement *statement) {
   statement->type = STATEMENT_INSERT;
 
-  strtok(input, " ");  // skip the word "insert"
+  char *keyword = strtok(input, " ");
   char *id_text = strtok(NULL, " ");
   char *username = strtok(NULL, " ");
   char *email = strtok(NULL, " ");
-  if (id_text == NULL || username == NULL || email == NULL) {
+  char *extra = strtok(NULL, " ");
+  if (strcmp(keyword, "insert") != 0) {
+    return "Unrecognized statement.";
+  }
+  if (id_text == NULL || username == NULL || email == NULL ||
+      extra != NULL) {
     return "Syntax error. Could not parse statement.";
   }
 ```
+The first word must be exactly `insert`, so `insertxyz` is rejected. Exactly three values must follow: a missing one or a fourth one is a syntax error.
 ---
 @concept
 ## strtoll reports where it stopped
@@ -140,6 +146,8 @@ db > insert x bob bob@example.com
 ID must be a number.
 db > insert 2 bob
 Syntax error. Could not parse statement.
+db > insert 2 bob bob@example.com extra
+Syntax error. Could not parse statement.
 db > .exit
 ```
 ---
@@ -156,6 +164,13 @@ db > .exit
 - [x] `ID is too large.`
 - [ ] The id wraps around to a small number
 > 5000000000 fits in a `long long` but is larger than `UINT32_MAX`.
+---
+@quiz
+## You type `insertxyz 1 alice a@b.c`. What prints?
+- [ ] `Would insert (1, alice, a@b.c)`
+- [x] `Unrecognized statement.`
+- [ ] `Syntax error. Could not parse statement.`
+> The line starts with "insert", so it reaches `prepare_insert`, but the first word is not exactly "insert".
 ---
 @quiz
 ## What does `strtok(NULL, " ")` return after the last word?

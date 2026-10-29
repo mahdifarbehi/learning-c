@@ -51,6 +51,8 @@ SQLite lessons map to tutorial parts as follows: 1–2 are parts 1–2, 3–4 ar
 - `get_page` bounds check uses `>=` (the tutorial's `>` lets page 100 through).
 - Part 5: the row count from the file length is computed as full pages × 13 plus leftover rows. The tutorial's `file_length / ROW_SIZE` is wrong after two full pages.
 - `write` results are compared with the requested size.
+- `insert` must be exactly that word followed by exactly three values (the tutorial accepts `insertxyz` and ignores extra words).
+- Fatal errors go to stderr. A file larger than 100 pages is refused when opened, instead of overflowing the page array.
 - `prepare` and `execute` return `NULL` or an error message string instead of result enums and `switch` statements. `MetaCommandResult` is gone. `.exit` and `.btree` are handled in `main`.
 - Cursors are returned by value. No `malloc`/`free` for cursors.
 - `.constants` is dropped. `.btree` uses the final tree format from part 8 on.
@@ -65,6 +67,9 @@ SQLite lessons map to tutorial parts as follows: 1–2 are parts 1–2, 3–4 ar
 - The `file_length` field disappears from Pager once pages are whole (lesson 8).
 
 ## Maintenance
+
+- `.nojekyll` stops GitHub Pages from running Jekyll, which would turn the lesson `.md` files into `.html` pages.
+- `C Stories.html` only redirects to `index.html`, for links and installs made before v1.
 
 - To add or rename a lesson, update the `COURSES` list in `index.html` and the `ASSETS` list in `sw.js`, then bump `CACHE` in `sw.js`.
 - The service worker serves cached files first and refreshes them in the background, so an edited lesson appears on the second load.

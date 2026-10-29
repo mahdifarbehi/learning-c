@@ -74,7 +74,7 @@ The array has room for one child more than a full node holds.
 ## Write the list back
 ```c
   if (count > INTERNAL_MAX_KEYS + 1) {
-    printf("Need to implement splitting internal node.\n");
+    fprintf(stderr, "Need to implement splitting internal node.\n");
     exit(EXIT_FAILURE);
   }
   set_internal_node_children(pager, parent_page_num, children, count);

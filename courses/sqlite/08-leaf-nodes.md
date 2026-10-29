@@ -127,10 +127,10 @@ typedef struct {
 ---
 @build
 ## Whole pages only
-In `pager_open`, check the length and count pages:
+In `pager_open`, after the size check, check the length and count pages:
 ```c
   if (file_length % PAGE_SIZE != 0) {
-    printf("Db file is not a whole number of pages. Corrupt file.\n");
+    fprintf(stderr, "Db file is not a whole number of pages.\n");
     exit(EXIT_FAILURE);
   }
   pager->file_descriptor = fd;
@@ -348,6 +348,6 @@ The keys are still in insert order. The next lesson sorts them.
 @quiz
 ## The file is 5000 bytes long. What happens when you open it?
 - [ ] The first page loads and the rest is ignored
-- [x] `Db file is not a whole number of pages. Corrupt file.`
+- [x] `Db file is not a whole number of pages.`
 - [ ] The file is truncated to 4096 bytes
 > 5000 is not a multiple of 4096.

@@ -46,7 +46,7 @@ leaf: 3 4
 ---
 @concept
 ## One node, one page
-Each node is one 4096-byte page. A link to a child is just its page number. The root is always page 0.
+Each node is one 4096-byte page. A link to a child is its page number, not a memory address: addresses change every time the program runs, but page numbers in the file stay the same. The root is always page 0.
 ---
 @concept
 ## Why it scales

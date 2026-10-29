@@ -38,6 +38,10 @@ void pager_open(Pager *pager, const char *filename) {
   if (file_length == -1) {
     die("lseek");
   }
+  if (file_length > (off_t)TABLE_MAX_PAGES * PAGE_SIZE) {
+    fprintf(stderr, "Db file is too large.\n");
+    exit(EXIT_FAILURE);
+  }
   pager->file_descriptor = fd;
   pager->file_length = (uint32_t)file_length;
   for (uint32_t i = 0; i < TABLE_MAX_PAGES; i++) {
@@ -45,14 +49,14 @@ void pager_open(Pager *pager, const char *filename) {
   }
 }
 ```
-Seeking to the end tells us how long the file is.
+Seeking to the end tells us how long the file is. A file longer than 100 pages cannot come from our program, and its pages would not fit in `pages`, so we refuse it.
 ---
 @build
 ## Get a page
 ```c
 char *get_page(Pager *pager, uint32_t page_num) {
   if (page_num >= TABLE_MAX_PAGES) {
-    printf("Page %u is out of bounds.\n", page_num);
+    fprintf(stderr, "Page %u is out of bounds.\n", page_num);
     exit(EXIT_FAILURE);
   }
   if (pager->pages[page_num] == NULL) {
@@ -186,8 +190,8 @@ char *row_slot(Table *table, uint32_t row_num) {
 ## A file name argument
 ```c
 int main(int argc, char *argv[]) {
-  if (argc < 2) {
-    printf("Must supply a database filename.\n");
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s DATABASE_FILE\n", argv[0]);
     return EXIT_FAILURE;
   }
   Table *table = db_open(argv[1]);

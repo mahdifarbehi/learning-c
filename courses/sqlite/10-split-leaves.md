@@ -226,7 +226,7 @@ This is the same gap trick as in `leaf_node_insert`, done in the buffer.
   if (is_node_root(old_node)) {
     create_new_root(cursor->table, new_page_num);
   } else {
-    printf("Need to implement updating parent after split.\n");
+    fprintf(stderr, "Need to implement updating parent after split.\n");
     exit(EXIT_FAILURE);
   }
 }

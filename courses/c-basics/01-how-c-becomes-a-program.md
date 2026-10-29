@@ -33,6 +33,8 @@ $ ./hello
 hello
 ```
 `cc` is your system's C compiler (gcc or clang). `-o hello` names the output file. `-Wall -Wextra` turn on warnings. Treat every warning as a bug to fix.
+
+Editing `hello.c` does not change `hello`. Compile again after every change.
 ---
 @concept
 ## #define replaces text
@@ -75,6 +77,14 @@ The placeholder must match the argument's type. `-Wall` warns when it does not.
 `printf` does not send text to the screen right away. It collects it in a **buffer**, and on a terminal it sends the buffer at each newline.
 
 To show text that has no newline, such as a prompt, call `fflush(stdout)`.
+---
+@concept
+## Errors go to stderr
+A program has two output streams: `stdout` for normal output and `stderr` for errors. Both appear in the terminal, but when you send normal output to a file, error messages still reach the screen.
+```c
+fprintf(stderr, "Something went wrong.\n");
+```
+`fprintf` works like `printf`, with the stream as its first argument.
 ---
 @concept
 ## Undefined behavior
