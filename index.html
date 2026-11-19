@@ -45,6 +45,8 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
 .lesson-link.done,.prereq-link.done{border-color:#4cc38a}
 .screen-back{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:16px;background:none;border:0;color:var(--fg);padding:8px 10px;cursor:pointer;font-size:1rem}
 .credit{border-top:1px solid rgba(160,157,150,.3);padding-top:14px;margin-top:4px}
+.chapter-title{font-family:Georgia,serif;font-size:1.2rem;line-height:1.3;margin:14px 0 0}
+.chapter-title:first-child{margin-top:0}
 #story{display:none}
 #story .stage{overflow-y:auto}
 #story.quiz .stage{background:linear-gradient(160deg,var(--quiz),var(--quiz2))}
@@ -82,7 +84,7 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
     <p class="eyebrow" id="courseProgress"></p>
     <h1 id="courseTitle"></h1>
     <p id="courseDescription"></p>
-    <p class="muted credit">Based on <em>Let's Build a Simple Database</em> by cstack. Rewritten for C Stories.</p>
+    <p class="muted credit" id="courseCredit"></p>
     <div class="lesson-list" id="lessons"></div>
   </section>
 
@@ -109,10 +111,14 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
   </div>
 </div>
 <script>
+const CSTACK_CREDIT = "Based on <em>Let's Build a Simple Database</em> by cstack. Rewritten for C Stories.";
+const AI_CHAPTER_1 = 'Chapter 1: Building AI applications with foundation models';
+
 const COURSES = {
   basics: {
     title: 'C Basics',
     description: 'The C-specific ideas you need before building the database.',
+    credit: CSTACK_CREDIT,
     lessons: [
       ['c-basics/how-c-becomes-a-program', 'How C becomes a program', 'courses/c-basics/01-how-c-becomes-a-program.md'],
       ['c-basics/pointers', 'Pointers, structs, and function arguments', 'courses/c-basics/02-pointers.md'],
@@ -125,6 +131,7 @@ const COURSES = {
   sqlite: {
     title: 'Build SQLite',
     description: 'Build a small persistent database, then grow its storage into a B+ tree.',
+    credit: CSTACK_CREDIT,
     lessons: [
       ['sqlite/repl', 'Build the REPL', 'courses/sqlite/01-repl.md'],
       ['sqlite/prepare-and-execute', 'Prepare and execute statements', 'courses/sqlite/02-prepare-and-execute.md'],
@@ -141,12 +148,36 @@ const COURSES = {
       ['sqlite/update-parent-nodes', 'Update a parent after a split', 'courses/sqlite/13-update-parent-nodes.md'],
       ['sqlite/split-internal-nodes', 'Split full internal nodes', 'courses/sqlite/14-split-internal-nodes.md']
     ]
+  },
+  aieng: {
+    title: 'AI Engineering',
+    description: 'How to build applications on top of foundation models, one chapter of the book at a time.',
+    credit: 'Based on <em>AI Engineering</em> by Chip Huyen (O’Reilly, 2025). Rewritten in our own words for C Stories.',
+    lessons: [
+      ['ai-engineering/why-ai-engineering', 'Why AI engineering took off', 'courses/ai-engineering/01-introduction/01-why-ai-engineering.md', AI_CHAPTER_1],
+      ['ai-engineering/language-models-and-tokens', 'Language models and tokens', 'courses/ai-engineering/01-introduction/02-language-models-and-tokens.md', AI_CHAPTER_1],
+      ['ai-engineering/completion-machines', 'Two kinds of language models', 'courses/ai-engineering/01-introduction/03-completion-machines.md', AI_CHAPTER_1],
+      ['ai-engineering/self-supervision', 'Self-supervision: how models got large', 'courses/ai-engineering/01-introduction/04-self-supervision.md', AI_CHAPTER_1],
+      ['ai-engineering/foundation-models', 'Foundation models', 'courses/ai-engineering/01-introduction/05-foundation-models.md', AI_CHAPTER_1],
+      ['ai-engineering/three-factors', 'Three reasons AI engineering grew', 'courses/ai-engineering/01-introduction/06-three-factors.md', AI_CHAPTER_1],
+      ['ai-engineering/mapping-use-cases', 'Mapping the use cases', 'courses/ai-engineering/01-introduction/07-mapping-use-cases.md', AI_CHAPTER_1],
+      ['ai-engineering/coding-images-writing', 'Coding, images and writing', 'courses/ai-engineering/01-introduction/08-coding-images-writing.md', AI_CHAPTER_1],
+      ['ai-engineering/bots-data-agents', 'Education, bots, data and agents', 'courses/ai-engineering/01-introduction/09-bots-data-agents.md', AI_CHAPTER_1],
+      ['ai-engineering/should-you-build-it', 'Should you build it?', 'courses/ai-engineering/01-introduction/10-should-you-build-it.md', AI_CHAPTER_1],
+      ['ai-engineering/moats-and-metrics', 'Moats and success metrics', 'courses/ai-engineering/01-introduction/11-moats-and-metrics.md', AI_CHAPTER_1],
+      ['ai-engineering/milestones-and-maintenance', 'Milestones and maintenance', 'courses/ai-engineering/01-introduction/12-milestones-and-maintenance.md', AI_CHAPTER_1],
+      ['ai-engineering/the-ai-stack', 'The AI engineering stack', 'courses/ai-engineering/01-introduction/13-the-ai-stack.md', AI_CHAPTER_1],
+      ['ai-engineering/ai-vs-ml-engineering', 'AI engineering versus ML engineering', 'courses/ai-engineering/01-introduction/14-ai-vs-ml-engineering.md', AI_CHAPTER_1],
+      ['ai-engineering/data-and-inference', 'Data and inference', 'courses/ai-engineering/01-introduction/15-data-and-inference.md', AI_CHAPTER_1],
+      ['ai-engineering/application-layer', 'The application layer', 'courses/ai-engineering/01-introduction/16-application-layer.md', AI_CHAPTER_1],
+      ['ai-engineering/chapter-1-review', 'Chapter 1 review', 'courses/ai-engineering/01-introduction/17-chapter-review.md', AI_CHAPTER_1]
+    ]
   }
 };
 
 const lessonBySlug = new Map();
 for (const [courseId, course] of Object.entries(COURSES)) {
-  course.lessons = course.lessons.map(([slug,title,path])=>({slug,title,path,courseId}));
+  course.lessons = course.lessons.map(([slug,title,path,chapter=''])=>({slug,title,path,chapter,courseId}));
   course.lessons.forEach(item=>lessonBySlug.set(item.slug,item));
 }
 
@@ -238,14 +269,26 @@ function renderCourse(courseId){
   const course=COURSES[courseId];
   $('courseTitle').textContent=course.title;
   $('courseDescription').textContent=course.description;
+  $('courseCredit').innerHTML=course.credit||'';
   $('courseProgress').textContent=courseCounts(course);
   $('lessons').innerHTML='';
-  course.lessons.forEach((item,index)=>{
+  let chapter='',number=0;
+  course.lessons.forEach(item=>{
+    if(item.chapter!==chapter){
+      chapter=item.chapter;number=0;
+      if(chapter){
+        const heading=document.createElement('h2');
+        heading.className='chapter-title';
+        heading.textContent=chapter;
+        $('lessons').appendChild(heading);
+      }
+    }
+    number++;
     const progress=loadProgress(item.path);
     const button=document.createElement('button');
     button.className='lesson-link'+(progress?.done?' done':'');
     const state=progress?.done?'Completed ✓':progress&&progress.card>0?`Resume at card ${progress.card+1}`:'Not started';
-    button.innerHTML=`<strong>${index+1}. ${inline(item.title)}</strong><span>${state}</span>`;
+    button.innerHTML=`<strong>${number}. ${inline(item.title)}</strong><span>${state}</span>`;
     button.onclick=()=>selectLesson(item);
     $('lessons').appendChild(button);
   });

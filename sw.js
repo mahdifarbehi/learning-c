@@ -1,5 +1,5 @@
 // Change the version when this file list changes.
-const CACHE = 'c-stories-v2';
+const CACHE = 'c-stories-v3';
 
 const ASSETS = [
   './',
@@ -28,7 +28,24 @@ const ASSETS = [
   'courses/sqlite/11-search-internal-nodes.md',
   'courses/sqlite/12-scan-multiple-leaves.md',
   'courses/sqlite/13-update-parent-nodes.md',
-  'courses/sqlite/14-split-internal-nodes.md'
+  'courses/sqlite/14-split-internal-nodes.md',
+  'courses/ai-engineering/01-introduction/01-why-ai-engineering.md',
+  'courses/ai-engineering/01-introduction/02-language-models-and-tokens.md',
+  'courses/ai-engineering/01-introduction/03-completion-machines.md',
+  'courses/ai-engineering/01-introduction/04-self-supervision.md',
+  'courses/ai-engineering/01-introduction/05-foundation-models.md',
+  'courses/ai-engineering/01-introduction/06-three-factors.md',
+  'courses/ai-engineering/01-introduction/07-mapping-use-cases.md',
+  'courses/ai-engineering/01-introduction/08-coding-images-writing.md',
+  'courses/ai-engineering/01-introduction/09-bots-data-agents.md',
+  'courses/ai-engineering/01-introduction/10-should-you-build-it.md',
+  'courses/ai-engineering/01-introduction/11-moats-and-metrics.md',
+  'courses/ai-engineering/01-introduction/12-milestones-and-maintenance.md',
+  'courses/ai-engineering/01-introduction/13-the-ai-stack.md',
+  'courses/ai-engineering/01-introduction/14-ai-vs-ml-engineering.md',
+  'courses/ai-engineering/01-introduction/15-data-and-inference.md',
+  'courses/ai-engineering/01-introduction/16-application-layer.md',
+  'courses/ai-engineering/01-introduction/17-chapter-review.md'
 ];
 
 self.addEventListener('install', event => {
