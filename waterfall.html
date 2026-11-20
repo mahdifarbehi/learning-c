@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f1a">
+<title>Autumn Falls</title>
+<style>
+html,body{
+  width:100%;
+  height:100%;
+  margin:0;
+  overflow:hidden;
+  background:#0b0f1a;
+}
+canvas{
+  display:block;
+  width:100vw;
+  height:100vh;
+  height:100dvh;
+  image-rendering:pixelated;
+  cursor:pointer;
+  touch-action:manipulation;
+}
+#hint{
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:max(18px, env(safe-area-inset-bottom));
+  text-align:center;
+  font:500 13px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;
+  color:rgba(255,255,255,.8);
+  text-shadow:0 1px 3px rgba(0,0,0,.85);
+  pointer-events:none;
+  animation:fade 6s ease forwards;
+}
+@keyframes fade{0%,65%{opacity:1}100%{opacity:0}}
+</style>
+</head>
+<body>
+<canvas id="scene" aria-label="Animated autumn valley with a big waterfall"></canvas>
+<div id="hint">tap for a new valley</div>
+<script>
+'use strict';
+// Every part of this valley is grown from random numbers, like the Doom fire:
+// - the waterfall is a grid of cells that each copy the cell above them (with a
+//   random sideways step), so bright and dark streaks fall and wander;
+// - the mist is the Doom fire itself, rising from the foot of the falls in white;
+// - foam on the pool copies itself downstream along the current, fading as it goes;
+// - trees are random branching, leaves are random clusters in autumn colors.
+// Every load (and every tap) grows a different valley.
+
+const STEP = 1000 / 30;
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d', {alpha: false});
+
+const rand = Math.random;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const ri = (a, b) => a + Math.floor(rand() * (b - a + 1));
+
+function hexRGB(h) { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+function pack(r, g, b) { return (0xff000000 | (b << 16) | (g << 8) | r) >>> 0; }
+function hex(h) { const c = hexRGB(h); return pack(c[0], c[1], c[2]); }
+function mix(a, b, t) {
+  const ar = a & 255, ag = a >>> 8 & 255, ab = a >>> 16 & 255;
+  return pack(
+    ar + ((b & 255) - ar) * t | 0,
+    ag + ((b >>> 8 & 255) - ag) * t | 0,
+    ab + ((b >>> 16 & 255) - ab) * t | 0);
+}
+function shade(c, f) {
+  return pack(
+    Math.min(255, (c & 255) * f) | 0,
+    Math.min(255, (c >>> 8 & 255) * f) | 0,
+    Math.min(255, (c >>> 16 & 255) * f) | 0);
+}
+function ramp(stops, n) {
+  const cs = stops.map(hexRGB), out = new Uint32Array(n);
+  for (let i = 0; i < n; i++) {
+    const p = i / (n - 1) * (cs.length - 1);
+    const k = Math.min(cs.length - 2, Math.floor(p)), f = p - k;
+    const a = cs[k], b = cs[k + 1];
+    out[i] = pack(a[0] + (b[0] - a[0]) * f | 0, a[1] + (b[1] - a[1]) * f | 0, a[2] + (b[2] - a[2]) * f | 0);
+  }
+  return out;
+}
+
+// Smooth random noise: a grid of random numbers, blended between grid points.
+function makeNoise() {
+  const g = new Float32Array(256 * 256);
+  for (let i = 0; i < g.length; i++) g[i] = rand();
+  return function (x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const x0 = xi & 255, y0 = yi & 255, x1 = (x0 + 1) & 255, y1 = (y0 + 1) & 255;
+    const a = g[y0 * 256 + x0], b = g[y0 * 256 + x1], c = g[y1 * 256 + x0], d = g[y1 * 256 + x1];
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  };
+}
+function fbm(n, x, y, oct) {
+  let s = 0, amp = 0.5, f = 1, norm = 0;
+  for (let o = 0; o < oct; o++) { s += amp * n(x * f, y * f); norm += amp; amp *= 0.5; f *= 2.03; }
+  return s / norm;
+}
+
+// Autumn leaf colors, five shades each, dark to light. w = how often it is picked.
+const LEAF = [
+  {w: 2,   c: ['#3d0b0e', '#6e1218', '#a3201f', '#d23b27', '#f06a3c']}, // crimson
+  {w: 2,   c: ['#4a1306', '#86260a', '#c2440f', '#ea6d1c', '#ff9a3d']}, // scarlet
+  {w: 3,   c: ['#4d2205', '#8c4009', '#cc6a10', '#f29621', '#ffc04d']}, // orange
+  {w: 3,   c: ['#4a3605', '#8a660a', '#c99a12', '#ecc531', '#fff08a']}, // gold
+  {w: 1.5, c: ['#2f3a10', '#566a18', '#8c9a22', '#c3c23e', '#e8e483']}, // yellow-green
+  {w: 1,   c: ['#2b0a18', '#511432', '#7e2349', '#ab3c62', '#d4677f']}, // maroon
+  {w: 1.5, c: ['#3b1706', '#6e2c0c', '#a14716', '#c96a2c', '#e59552']}, // rust
+  {w: 0.7, c: ['#0b1f14', '#143524', '#1f4d31', '#2f6a40', '#4a8a55']}  // evergreen
+].map(s => ({w: s.w, c: s.c.map(hex)}));
+const GOLD = 3, EVERGREEN = 7;
+const LEAF_W = LEAF.reduce((s, l) => s + l.w, 0);
+function pickLeaf() {
+  let r = rand() * LEAF_W;
+  for (let i = 0; i < LEAF.length; i++) { r -= LEAF[i].w; if (r <= 0) return i; }
+  return 0;
+}
+function neighbourLeaf(i) { return clamp(i + (rand() < 0.5 ? -1 : 1), 0, LEAF.length - 2); }
+
+const MOODS = [
+  {sky: ['#141b3d', '#2e2f6b', '#6b4c8f', '#c26a8e', '#f29a7a', '#ffd08a'], haze: '#e3a68e', sun: '#fff1c9', mist: '#f7e9e4', water: '#13303f', stars: true},
+  {sky: ['#24406e', '#3f6597', '#7f9fc2', '#d9bc98', '#f3cf8a', '#fff0c4'], haze: '#e2cca4', sun: '#fff8dc', mist: '#f4f1ea', water: '#16384a'},
+  {sky: ['#1b2f4a', '#365f80', '#7d9fb3', '#cdb0a4', '#ecc39e', '#f9e0c0'], haze: '#d6c1b2', sun: '#fff3e0', mist: '#eef0f2', water: '#122f3d'}
+];
+
+const ROCK = ramp(['#16110e', '#2a221c', '#3f342b', '#58493c', '#776452', '#988470', '#b5a38c'], 64);
+const FOAM = hex('#f4f8f8');
+const SPRAY = hex('#cfe6ee');
+const FOAM_A = new Float32Array(256);
+for (let v = 1; v < 256; v++) FOAM_A[v] = Math.min(0.95, Math.pow(v / 46, 1.25));
+
+let W = 0, H = 0, N = 0, img, out;
+let bg, fg, fgList, groundMask, waterMask;
+let mood, haze, waterCol, mistCol, sunC, lightDir, FALL;
+let cx, lipY, topRow, poolY, fw0, fw1, fx0, fx1;
+let bry, brx, bcy, rw0, rw1, shift, wl, wr, topY, cliffBot;
+let fall, colState, edgeL, edgeR, streakN;
+let wIdx, wX, wY, wD, wVX, wVY, wCount = 0, foamA, foamB, rockFoam;
+let mist, mistMax, mistTop, mistSrc, mistBot, mx0, mx1;
+let bgLeaves, fgLeaves, twBg, twFg, tw;
+let gN = 0, gX, gY, gH, gF, gL, gB, gT, gFl;
+let leaves = [], drops = [];
+let time = 0, tick = 0, wind = 0, gust = 0, gustTarget = 0;
+let FX = 0, FY = 0;
+
+function cellFor(cw, ch) { return Math.max(2, Math.ceil(Math.max(cw, ch) / 500)); }
+
+function halfAt(y) {
+  if (y < lipY) return lerp(fw0 * 0.34, fw0 * 0.5, (y - topRow) / (lipY - topRow));
+  return lerp(fw0 * 0.5, fw1 * 0.5, Math.pow((y - lipY) / (poolY - lipY), 0.8));
+}
+
+// ---------- building the still parts of the valley ----------
+
+function build() {
+  const cw = Math.max(1, innerWidth), ch = Math.max(1, innerHeight);
+  const cell = cellFor(cw, ch);
+  W = Math.ceil(cw / cell); H = Math.ceil(ch / cell); N = W * H;
+  canvas.width = W; canvas.height = H;
+  img = ctx.createImageData(W, H);
+  out = new Uint32Array(img.data.buffer);
+  bg = new Uint32Array(N); fg = new Uint32Array(N);
+  groundMask = new Uint8Array(N); waterMask = new Uint8Array(N);
+  twBg = new Uint8Array(N); twFg = new Uint8Array(N); tw = [];
+  bgLeaves = []; fgLeaves = []; leaves = []; drops = []; rockFoam = [];
+
+  mood = MOODS[(rand() * MOODS.length) | 0];
+  haze = hex(mood.haze); waterCol = hex(mood.water); mistCol = hex(mood.mist); sunC = hex(mood.sun);
+
+  const portrait = H > W * 1.1;
+  cx = Math.round(W * (0.5 + (rand() - 0.5) * 0.06));
+  lipY = Math.round(H * (portrait ? 0.30 : 0.31));
+  poolY = Math.round(H * (portrait ? 0.68 : 0.71));
+  topRow = lipY - Math.max(3, Math.round(H * 0.03));
+  fw0 = Math.max(12, Math.round(W * (portrait ? 0.24 : 0.12)));
+  fw1 = Math.round(fw0 * 1.45);
+
+  const sunX = rand() < 0.5 ? W * (0.16 + rand() * 0.16) : W * (0.68 + rand() * 0.16);
+  const sunY = lipY * (0.45 + rand() * 0.3);
+  lightDir = sunX < cx ? -1 : 1;
+  FALL = ramp(['#0c2733', '#174456', '#24627a', '#3a8099', '#5d9fb5', '#8bc0cf', '#bcdde5', '#e6f4f6', '#ffffff'], 64)
+    .map(c => mix(c, haze, 0.08));
+
+  shapeWater(portrait);
+  paintSky(sunX, sunY);
+  paintMountains();
+  paintGround();
+  paintCliff();
+  paintCliffForest();
+  paintShore();
+  paintMidTrees(portrait);
+  vignette(bg);
+  paintForeground();
+  vignette(fg);
+
+  const list = [];
+  for (let i = 0; i < N; i++) if (fg[i]) list.push(i);
+  fgList = Int32Array.from(list);
+
+  buildWaterList();
+  buildGrass();
+  initMotion();
+}
+
+function shapeWater(portrait) {
+  bry = Math.max(5, Math.round(H * 0.075));
+  brx = Math.min(W * 0.44, Math.max(fw1 * 1.5, W * 0.27));
+  bcy = poolY + bry * 0.8;
+  rw0 = brx * 0.45;
+  rw1 = W * (portrait ? 0.34 : 0.24);
+  shift = (rand() - 0.5) * W * 0.18;
+  wl = new Int16Array(H); wr = new Int16Array(H);
+  const n = makeNoise();
+  for (let y = 0; y < H; y++) {
+    let l = 1e9, r = -1e9;
+    const ey = (y - bcy) / bry;
+    if (ey > -1 && ey < 1) { const hw = brx * Math.sqrt(1 - ey * ey); l = cx - hw; r = cx + hw; }
+    if (y >= bcy) {
+      const t = (y - bcy) / (H - bcy);
+      const rc = cx + shift * t * t, hw = lerp(rw0, rw1, t);
+      l = Math.min(l, rc - hw); r = Math.max(r, rc + hw);
+    }
+    if (r < l) { wl[y] = 1; wr[y] = 0; continue; }
+    const amp = 1.5 + 3 * clamp((y - poolY) / (H - poolY), 0, 1);
+    wl[y] = clamp(Math.round(l + (fbm(n, y * 0.12, 1.5, 3) - 0.5) * 2 * amp), 0, W - 1);
+    wr[y] = clamp(Math.round(r + (fbm(n, y * 0.12, 7.5, 3) - 0.5) * 2 * amp), 0, W - 1);
+    for (let x = wl[y]; x <= wr[y]; x++) waterMask[y * W + x] = 1;
+  }
+}
+
+function paintSky(sunX, sunY) {
+  const sky = ramp(mood.sky, 256), n = makeNoise();
+  const m = Math.min(W, H), sunR = Math.max(2.5, m * 0.03), glowR = m * 0.28;
+  const dark = mix(sky[40], hex('#2c2440'), 0.5), white = hex('#ffffff');
+  for (let y = 0; y < H; y++) {
+    const base = sky[clamp(Math.round(y / lipY * 255), 0, 255)];
+    for (let x = 0; x < W; x++) {
+      const dx = x - sunX, dy = (y - sunY) * 1.2, d = Math.sqrt(dx * dx + dy * dy);
+      let c = mix(base, sunC, Math.exp(-d / glowR) * 0.6);
+      if (d < sunR) c = sunC;
+      if (y < lipY) {
+        const cl = fbm(n, x * 0.009, y * 0.05, 5);
+        const a = smooth(0.54, 0.74, cl);
+        if (a > 0) {
+          let cc = mix(dark, haze, clamp(0.25 + y / lipY * 0.6 + (cl - 0.6) * 2, 0, 1));
+          cc = mix(cc, sunC, Math.exp(-d / (glowR * 0.6)) * 0.7);
+          c = mix(c, cc, a * 0.85);
+        } else if (mood.stars && y < lipY * 0.35 && rand() < 0.0025) {
+          c = mix(c, white, 0.5 + rand() * 0.4);
+        }
+      }
+      bg[y * W + x] = c;
+    }
+  }
+}
+
+function paintMountains() {
+  const n = makeNoise(), n2 = makeNoise(), n3 = makeNoise(), n4 = makeNoise();
+  const far = mix(hex('#5b5288'), haze, 0.42), farLow = mix(far, haze, 0.55);
+  const snow = hex('#f4eef0');
+  // far mountains
+  for (let x = 0; x < W; x++) {
+    const ridge = Math.round(lipY - H * 0.03 - Math.pow(fbm(n, x * 0.0055 + 3, 0.5, 5), 1.5) * H * 0.34);
+    for (let y = Math.max(0, ridge); y < poolY; y++) {
+      let c = mix(far, farLow, clamp((y - ridge) / (H * 0.22), 0, 1));
+      c = shade(c, 0.9 + fbm(n2, x * 0.05, y * 0.05, 3) * 0.2);
+      if (ridge < H * 0.13 && y - ridge < 3 && rand() < 0.7) c = mix(c, snow, 0.45);
+      bg[y * W + x] = c;
+    }
+  }
+  // near hills covered in autumn forest, seen through haze
+  for (let x = 0; x < W; x++) {
+    const ridge = Math.round(lipY - H * 0.05 - fbm(n3, x * 0.01 + 7, 2.5, 4) * H * 0.13 - n4(x * 0.7, 1.5) * 2.5);
+    for (let y = Math.max(0, ridge); y < poolY; y++) {
+      const pal = LEAF[Math.min(6, (n4(x * 0.045, y * 0.06 + 20) * 7) | 0)].c;
+      const s = clamp(Math.round(n3(x * 0.6, y * 0.6 + 50) * 3.2 + (y - ridge < 2 ? 1 : 0)), 0, 4);
+      bg[y * W + x] = mix(pal[s], haze, 0.42 + 0.15 * clamp((y - ridge) / (H * 0.18), 0, 1));
+    }
+  }
+}
+
+function paintGround() {
+  const n = makeNoise();
+  const G = ramp(['#2b2511', '#463c1a', '#665622', '#86722e', '#a38d3c', '#bea44f'], 64);
+  const russet = hex('#87391a');
+  for (let y = Math.max(0, poolY - 8); y < H; y++) {
+    const depth = clamp((y - poolY) / (H - poolY), 0, 1);
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      let c = G[clamp(Math.round((0.1 + fbm(n, x * 0.07, y * 0.2, 4) * 0.75 + depth * 0.2) * 63), 0, 63)];
+      const p = n(x * 0.025 + 40, y * 0.07 + 40);
+      if (p > 0.6) c = mix(c, russet, (p - 0.6) * 1.6);
+      if (rand() < 0.05 + depth * 0.07) c = LEAF[ri(0, 6)].c[ri(1, 4)];
+      bg[i] = mix(c, haze, (1 - depth) * 0.22);
+      if (!waterMask[i]) groundMask[i] = 1;
+    }
+  }
+}
+
+function paintCliff() {
+  const n1 = makeNoise(), n2 = makeNoise(), n3 = makeNoise();
+  const moss = LEAF[EVERGREEN].c;
+  topY = new Int16Array(W); cliffBot = new Int16Array(W);
+  for (let x = 0; x < W; x++) {
+    const d = Math.abs(x - cx) / (fw0 * 0.5);
+    const sh = smooth(0.95, 1.9, d);
+    topY[x] = Math.round(topRow + 1 - sh * (H * 0.045 + fbm(n1, x * 0.035, 3.3, 4) * H * 0.07));
+    cliffBot[x] = poolY + 2 + Math.round(n1(x * 0.2, 9.1) * 4);
+  }
+  for (let x = 0; x < W; x++) {
+    for (let y = Math.max(0, topY[x]); y <= cliffBot[x] && y < H; y++) {
+      const i = y * W + x;
+      let v = 0.18 + fbm(n2, x * 0.05, y * 0.28, 4) * 0.62;               // layers in the rock
+      v -= Math.max(0, fbm(n3, x * 0.22, y * 0.025, 3) - 0.6) * 2.2;      // vertical cracks
+      const down = (y - topY[x]) / Math.max(1, cliffBot[x] - topY[x]);
+      v += (1 - down) * 0.12 - smooth(0.75, 1, down) * 0.15;
+      const e = Math.abs(x - cx) - (y < lipY ? fw0 * 0.5 : halfAt(y));     // distance from the falls
+      if (e < 14) v -= (1 - Math.max(0, e) / 14) * 0.22;                   // wet rock is darker
+      if (y - topY[x] < 2) v += 0.15;
+      let c = ROCK[clamp(Math.round(v * 63), 0, 63)];
+      if (e > -2 && e < 8 && y > lipY && rand() < 0.5 * (1 - e / 8)) {
+        c = mix(c, moss[ri(1, 3)], 0.7);                                   // spray keeps moss green
+      } else if (e > 6 && fbm(n1, x * 0.11 + 50, y * 0.035, 3) > 0.6 && rand() < 0.8) {
+        c = LEAF[Math.min(6, (n2(x * 0.03, y * 0.03 + 9) * 7) | 0)].c[ri(1, 4)]; // red and orange creepers
+      }
+      bg[i] = mix(c, haze, 0.1);
+      groundMask[i] = 0;
+    }
+  }
+}
+
+function paintCliffForest() {
+  for (let x = 0; x < W; x += 2) {
+    if (Math.abs(x - cx) < fw0 * 0.5) continue;
+    const li = pickLeaf();
+    foliage(bg, x + rand() * 2, topY[x] + 1, 1.5 + rand() * 2.5, LEAF[li].c, LEAF[li].c, 0.2, null, 0);
+  }
+  for (let x = ri(0, 4); x < W; x += ri(3, 8)) {
+    const d = Math.abs(x - cx);
+    if (d < fw0 * 0.62) continue;
+    const h = H * (0.05 + rand() * 0.07) * (d < fw0 * 1.1 ? 0.6 : 1);
+    tree(bg, x, topY[x] + 2, h, (rand() - 0.5) * 0.3, 0.22, null, 4, 0);
+  }
+}
+
+function paintShore() {
+  const wet = hex('#1a1813');
+  for (let y = Math.max(0, poolY - 6); y < H; y++) {
+    if (wl[y] > wr[y]) continue;
+    for (let k = 1; k <= 3; k++) {
+      for (const x of [wl[y] - k, wr[y] + k]) {
+        if (x < 0 || x >= W) continue;
+        const i = y * W + x;
+        if (groundMask[i]) bg[i] = mix(bg[i], wet, 0.6 - k * 0.15);
+      }
+    }
+  }
+  // rocks along the banks
+  const count = Math.max(4, Math.round(W / 20));
+  for (let k = 0; k < count; k++) {
+    const y = ri(poolY + 2, H - 2);
+    if (wl[y] > wr[y]) continue;
+    const x = rand() < 0.5 ? wl[y] + ri(-2, 2) : wr[y] + ri(-2, 2);
+    const depth = (y - poolY) / (H - poolY);
+    const rx = 1.5 + depth * H * 0.025 * (0.5 + rand());
+    boulder(bg, x, y, rx, rx * 0.6, 0.06 * (1 - depth));
+  }
+  // big rocks on both sides of the plunge
+  for (const side of [-1, 1]) {
+    const rx = fw1 * (0.18 + rand() * 0.12);
+    boulder(bg, cx + side * (fw1 * 0.5 + rx * 0.9), poolY + 1, rx, rx * 0.55, 0.04);
+  }
+  // rocks in the stream; white water forms just below them
+  for (let k = ri(1, 3); k > 0; k--) {
+    const y = ri(Math.round(lerp(bcy, H, 0.35)), H - 4);
+    if (wl[y] > wr[y]) continue;
+    const x = Math.round(wl[y] + (wr[y] - wl[y]) * (0.25 + rand() * 0.5));
+    const depth = (y - poolY) / (H - poolY);
+    const rx = 1.5 + depth * H * 0.018 * (0.6 + rand()), ry = rx * 0.55;
+    boulder(bg, x, y, rx, ry, 0);
+    const Y = Math.round(y + ry + 1);
+    if (Y >= H) continue;
+    for (let dx = -Math.ceil(rx); dx <= Math.ceil(rx); dx++) {
+      const X = x + dx;
+      if (X >= 0 && X < W && waterMask[Y * W + X]) rockFoam.push(Y * W + X);
+    }
+  }
+}
+
+function paintMidTrees(portrait) {
+  const clip = fw1 * 0.55 + 2;
+  for (const side of [-1, 1]) {
+    const count = portrait ? ri(1, 2) : ri(2, 4);
+    for (let k = 0; k < count; k++) {
+      const yb = ri(poolY + 3, poolY + Math.max(4, Math.round(H * 0.1)));
+      const edge = wl[yb] <= wr[yb] ? (side < 0 ? wl[yb] - 4 : wr[yb] + 4) : cx;
+      const xa = side < 0 ? 0 : edge, xb = side < 0 ? edge : W - 1;
+      if (xb - xa < 2) continue;
+      const h = H * (0.2 + rand() * 0.18);
+      tree(bg, ri(xa, xb), yb, h, side * (0.04 + rand() * 0.14), 0.08, bgLeaves, 5, clip);
+    }
+  }
+}
+
+function paintForeground() {
+  const clip = fw1 * 0.55 + 2;
+  const size = Math.min(H * 0.72, W * 0.85);
+  // two big trees framing the view
+  for (const side of [-1, 1]) {
+    const off = ri(-Math.round(W * 0.03), Math.round(W * 0.06));
+    const x = side < 0 ? off : W - 1 - off;
+    tree(fg, x, H + 3, size * (0.88 + rand() * 0.22), -side * (0.04 + rand() * 0.1), 0, fgLeaves, 6, clip);
+  }
+  // bright bushes on the near banks
+  for (const side of [-1, 1]) {
+    for (let k = ri(2, 4); k > 0; k--) {
+      const yb = ri(Math.round(H * 0.84), H - 1);
+      let xa, xb;
+      if (wl[yb] > wr[yb]) { xa = 0; xb = W - 1; }
+      else if (side < 0) { xa = 0; xb = wl[yb] - 4; }
+      else { xa = wr[yb] + 4; xb = W - 1; }
+      if (xb - xa < 4) continue;
+      const x = ri(xa, xb), li = pickLeaf(), r = H * (0.018 + rand() * 0.022);
+      const pal = LEAF[li].c, pal2 = LEAF[neighbourLeaf(li)].c;
+      for (let j = ri(4, 7); j > 0; j--) {
+        foliage(fg, x + (rand() - 0.5) * r * 2.6, yb - rand() * r * 1.6, r * (0.6 + rand() * 0.5), pal, pal2, 0, fgLeaves, 0);
+      }
+    }
+  }
+  // rocks at the near edge of the stream
+  for (const side of [-1, 1]) {
+    if (rand() < 0.3) continue;
+    const y = H - ri(1, Math.max(1, Math.round(H * 0.04)));
+    if (wl[y] > wr[y]) continue;
+    const x = side < 0 ? wl[y] + ri(-3, 2) : wr[y] + ri(-2, 3);
+    const rx = H * (0.03 + rand() * 0.03);
+    boulder(fg, x, y, rx, rx * 0.6, 0);
+  }
+}
+
+function vignette(L) {
+  for (let y = 0; y < H; y++) {
+    const dy = (y / H - 0.5) * 2;
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!L[i]) continue;
+      const dx = (x / W - 0.5) * 2;
+      L[i] = shade(L[i], 1 - 0.3 * Math.pow((dx * dx + dy * dy) * 0.5, 1.5));
+    }
+  }
+}
+
+// A tree: a trunk that splits again and again at random angles; leaf clusters at the tips.
+function tree(L, x, y, h, lean, hz, list, depth, clip) {
+  const li = pickLeaf();
+  const birch = (li === GOLD && rand() < 0.5) || rand() < 0.08;
+  const bark = (birch ? ['#6f685c', '#c9c2b2', '#ebe5d6'] : ['#1f140d', '#3a281b', '#5a412b'])
+    .map(c => hz ? mix(hex(c), haze, hz) : hex(c));
+  const T = {
+    L, bark, birch, hz, list, clip,
+    pal: LEAF[li].c, pal2: LEAF[neighbourLeaf(li)].c,
+    leafR: h * (depth >= 6 ? 0.065 : depth === 5 ? 0.08 : 0.1)
+  };
+  branch(T, x, y, -Math.PI / 2 + lean, h * 0.34, Math.max(1, h * 0.045), depth);
+}
+
+function branch(T, x, y, ang, len, th, depth) {
+  let ex = x + Math.cos(ang) * len, ey = y + Math.sin(ang) * len;
+  // keep the view of the waterfall open: a branch heading into it turns back
+  if (T.clip && Math.abs(ex - cx) < T.clip + 4 && (ex - x) * (cx - x) > 0) {
+    ang = Math.PI - ang;
+    ex = x + Math.cos(ang) * len; ey = y + Math.sin(ang) * len;
+  }
+  stroke(T, x, y, ex, ey, th);
+  if (depth <= 0) {
+    foliage(T.L, ex, ey, T.leafR * (0.7 + rand() * 0.6), T.pal, T.pal2, T.hz, T.list, T.clip);
+    return;
+  }
+  const n = rand() < 0.35 ? 3 : 2;
+  for (let k = 0; k < n; k++) {
+    const spread = n === 2 ? (k === 0 ? -1 : 1) * (0.25 + rand() * 0.35) : (k - 1) * (0.35 + rand() * 0.25);
+    const a = lerp(ang + spread + (rand() - 0.5) * 0.25, -Math.PI / 2, 0.12);
+    branch(T, ex, ey, a, len * (0.66 + rand() * 0.16), th * 0.68, depth - 1);
+  }
+  if (depth <= 2 && rand() < 0.5) foliage(T.L, ex, ey, T.leafR * 0.8, T.pal, T.pal2, T.hz, T.list, T.clip);
+}
+
+function stroke(T, x0, y0, x1, y1, th) {
+  const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0)) + 1;
+  const r = th / 2, R = Math.ceil(r);
+  for (let s = 0; s <= n; s++) {
+    const f = s / n, px = x0 + (x1 - x0) * f, py = y0 + (y1 - y0) * f;
+    for (let dy = -R; dy <= R; dy++) {
+      for (let dx = -R; dx <= R; dx++) {
+        if (dx * dx + dy * dy > r * r + 0.6) continue;
+        const X = Math.round(px + dx), Y = Math.round(py + dy);
+        if (X < 0 || X >= W || Y < 0 || Y >= H) continue;
+        const side = dx / (r + 0.5) * lightDir;
+        let c = side > 0.3 ? T.bark[2] : side < -0.35 ? T.bark[0] : T.bark[1];
+        if (T.birch && rand() < 0.08) c = T.bark[0];
+        T.L[Y * W + X] = c;
+      }
+    }
+  }
+}
+
+function foliage(L, x0, y0, r, pal, pal2, hz, list, clip) {
+  const p = rand() < 0.3 ? pal2 : pal;
+  const R = Math.ceil(r), rr = r * r, inner = r * r * 0.42;
+  for (let dy = -R; dy <= R; dy++) {
+    for (let dx = -R; dx <= R; dx++) {
+      const d2 = dx * dx + dy * dy;
+      if (d2 > rr) continue;
+      if (d2 > inner && rand() < 0.45) continue;   // ragged edge
+      if (rand() < 0.1) continue;                  // gaps between leaves
+      const X = Math.round(x0 + dx), Y = Math.round(y0 + dy);
+      if (X < 0 || X >= W || Y < 0 || Y >= H) continue;
+      if (clip && Math.abs(X - cx) < clip) continue;
+      const light = (dx * lightDir * 0.55 - dy * 0.85) / r;
+      let c = p[clamp(Math.round(2 + light * 1.5 + (rand() - 0.5) * 1.6), 0, 4)];
+      if (hz) c = mix(c, haze, hz);
+      const i = Y * W + X;
+      L[i] = c;
+      if (list) list.push(i);
+    }
+  }
+}
+
+function boulder(L, x0, y0, rx, ry, hz) {
+  const RX = Math.ceil(rx), RY = Math.ceil(ry);
+  for (let dy = -RY; dy <= RY; dy++) {
+    for (let dx = -RX; dx <= RX; dx++) {
+      const e = (dx / rx) * (dx / rx) + (dy / ry) * (dy / ry);
+      if (e > 1 || (e > 0.8 && rand() < 0.5)) continue;
+      const X = Math.round(x0 + dx), Y = Math.round(y0 + dy);
+      if (X < 0 || X >= W || Y < 0 || Y >= H) continue;
+      const light = (dx / rx) * lightDir * 0.45 - (dy / ry) * 0.8;
+      let c = ROCK[clamp(Math.round((0.42 + light * 0.3 + (rand() - 0.5) * 0.1 - e * 0.12) * 63), 0, 63)];
+      if (dy < -ry * 0.4 && rand() < 0.25) c = LEAF[ri(0, 6)].c[ri(1, 4)];   // fallen leaves on top
+      if (hz) c = mix(c, haze, hz);
+      const i = Y * W + X;
+      L[i] = c;
+      if (L === bg) { groundMask[i] = 0; waterMask[i] = 0; }
+    }
+  }
+}
+
+// Which way the water moves: outward from where the falls land, then down the stream.
+function flowAt(x, y) {
+  const dx = x - cx, dy = (y - poolY + 2) * 2.2;
+  const len = Math.hypot(dx, dy) || 1;
+  const sp = 0.55 + clamp((y - poolY) / (H - poolY), 0, 1) * 1.4;
+  let fx = dx / len * sp, fy = dy / len * sp;
+  const w = smooth(bcy - bry * 0.3, bcy + bry * 0.6, y);
+  if (w > 0) {
+    const t = clamp((y - bcy) / (H - bcy), 0, 1);
+    const rc = cx + shift * t * t, hw = Math.max(1, lerp(rw0, rw1, t));
+    const slope = shift * 2 * t / (H - bcy);
+    const down = sp * 1.1;
+    fx = lerp(fx, (slope + (x - rc) / hw * 0.25) * down, w);
+    fy = lerp(fy, down, w);
+  }
+  FX = fx; FY = fy;
+}
+
+function buildWaterList() {
+  let count = 0;
+  for (let i = 0; i < N; i++) if (waterMask[i]) count++;
+  wIdx = new Int32Array(count); wX = new Int16Array(count); wY = new Int16Array(count);
+  wD = new Float32Array(count); wVX = new Float32Array(count); wVY = new Float32Array(count);
+  let k = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!waterMask[i]) continue;
+      wIdx[k] = i; wX[k] = x; wY[k] = y;
+      wD[k] = clamp((y - poolY) / (H - poolY), 0, 1);
+      flowAt(x, y); wVX[k] = FX; wVY[k] = FY;
+      k++;
+    }
+  }
+  wCount = count;
+}
+
+function buildGrass() {
+  const base = ['#5c4b1c', '#7a6526', '#9a8034', '#b89a45', '#cdb25a', '#8a4a22', '#6a6a2a', '#a8652c'].map(hex);
+  const flowers = ['#9b6fd6', '#f0c234', '#f3efe6', '#d9483b'].map(hex);
+  const reedBase = hex('#7a6a3a'), reedTip = hex('#e8d9a8'), cattail = hex('#4a2c16');
+  const target = Math.round(W * (H - poolY) * 0.07);
+  gX = new Float32Array(target); gY = new Int16Array(target); gH = new Float32Array(target);
+  gF = new Float32Array(target); gL = new Float32Array(target);
+  gB = new Uint32Array(target); gT = new Uint32Array(target); gFl = new Uint32Array(target);
+  gN = 0;
+  for (let tries = 0; tries < target * 4 && gN < target; tries++) {
+    const y = Math.round(poolY + 4 + (H - poolY - 4) * Math.sqrt(rand()));
+    if (y >= H) continue;
+    const x = (rand() * W) | 0;
+    if (!groundMask[y * W + x]) continue;
+    const depth = (y - poolY) / (H - poolY);
+    const shore = wl[y] <= wr[y] && Math.min(Math.abs(x - wl[y]), Math.abs(x - wr[y])) < 4;
+    let h = 1.5 + depth * H * 0.05 * (0.4 + rand() * 0.9);
+    let b = base[(rand() * base.length) | 0], tip = shade(b, 1.3), fl = 0;
+    if (shore && rand() < 0.55) {
+      h *= 1.7; b = reedBase; tip = reedTip;
+      if (rand() < 0.3) fl = cattail;
+    } else if (rand() < 0.07) {
+      fl = flowers[(rand() * flowers.length) | 0];
+    }
+    gX[gN] = x; gY[gN] = y; gH[gN] = h;
+    gF[gN] = 0.5 + rand() * 0.7; gL[gN] = (rand() - 0.5) * 0.5;
+    gB[gN] = b; gT[gN] = tip; gFl[gN] = fl;
+    gN++;
+  }
+}
+
+function initMotion() {
+  fx0 = Math.max(1, Math.floor(cx - fw1 / 2 - 4));
+  fx1 = Math.min(W - 2, Math.ceil(cx + fw1 / 2 + 4));
+  fall = new Uint8Array(N);
+  colState = new Float32Array(W).fill(40);
+  streakN = makeNoise();
+  const n = makeNoise();
+  edgeL = new Float32Array(H); edgeR = new Float32Array(H);
+  for (let y = 0; y < H; y++) {
+    edgeL[y] = (fbm(n, y * 0.15, 0.5, 3) - 0.5) * 4;
+    edgeR[y] = (fbm(n, y * 0.15, 9.5, 3) - 0.5) * 4;
+  }
+  foamA = new Uint8Array(N); foamB = new Uint8Array(N);
+  mist = new Uint8Array(N);
+  mistMax = Math.max(12, Math.round(H * 0.13));
+  mistSrc = Math.min(H - 2, poolY + 2);
+  mistTop = Math.max(0, mistSrc - Math.round(mistMax * 1.9));
+  mistBot = Math.min(H - 1, poolY + bry);
+  mx0 = Math.max(0, Math.round(cx - fw1 * 1.35));
+  mx1 = Math.min(W - 1, Math.round(cx + fw1 * 1.35));
+  for (let k = 0; k < 150; k++) update();   // let the water and mist fill in before the first frame
+}
+
+// ---------- the moving parts ----------
+
+// The waterfall: every cell copies the cell above it (a little more rows per step
+// lower down, as the water speeds up), sometimes one column to the side.
+function updateFalls() {
+  for (let x = fx0; x <= fx1; x++) {
+    const target = 22 + fbm(streakN, x * 0.28 + time * 0.15, 0.5, 2) * 41;
+    let s = colState[x] + (target - colState[x]) * 0.25 + (rand() - 0.5) * 14;
+    if (rand() < 0.02) s -= 18;
+    s = clamp(s, 4, 63);
+    colState[x] = s;
+    fall[topRow * W + x] = s;
+  }
+  for (let y = poolY + 1; y > topRow; y--) {
+    const t = y <= lipY ? 0 : (y - lipY) / (poolY - lipY);
+    const sp = y <= lipY ? 1 : 1 + ((t * 2.7) | 0);
+    const srow = Math.max(topRow, y - sp) * W, row = y * W;
+    const churn = t > 0.75 ? (t - 0.75) * 40 : 0;
+    for (let x = fx0; x <= fx1; x++) {
+      const r = rand();
+      let v = fall[srow + (r < 0.12 ? x - 1 : r > 0.88 ? x + 1 : x)];
+      if (r > 0.4 && r < 0.55) v -= 1;
+      if (churn) v += rand() * churn;
+      fall[row + x] = v < 0 ? 0 : v > 63 ? 63 : v;
+    }
+  }
+}
+
+// Foam: each water cell copies the cell upstream of it, and fades a little.
+function updateFoam() {
+  const src = foamA, dst = foamB;
+  for (let k = 0; k < wCount; k++) {
+    const sx = Math.round(wX[k] - wVX[k] + rand() - 0.5);
+    const sy = Math.round(wY[k] - wVY[k] + rand() - 0.5);
+    let v = 0;
+    if (sx >= 0 && sx < W && sy >= 0 && sy < H) {
+      v = src[sy * W + sx];
+      if (v && rand() < 0.7) v--;
+    }
+    dst[wIdx[k]] = v;
+  }
+  const hw = fw1 * 0.5;
+  for (let x = Math.max(0, Math.round(cx - hw)); x <= Math.min(W - 1, Math.round(cx + hw)); x++) {
+    for (let y = poolY - 2; y <= poolY + 2; y++) {
+      if (rand() < 0.7) dst[y * W + x] = 42 + ((rand() * 22) | 0);
+    }
+  }
+  for (let k = 0; k < rockFoam.length; k++) if (rand() < 0.5) dst[rockFoam[k]] = 26 + ((rand() * 14) | 0);
+  const glints = (wCount / 600) | 0;
+  for (let k = 0; k < glints; k++) {
+    const i = wIdx[(rand() * wCount) | 0];
+    if (dst[i] < 14) dst[i] = 10 + ((rand() * 10) | 0);
+  }
+  foamA = dst; foamB = src;
+}
+
+// The mist is the Doom fire: each cell takes the value of the cell below it,
+// minus a random bit, and lands a random step to the side.
+function updateMist() {
+  for (let x = mx0; x <= mx1; x++) {
+    const d = Math.abs(x - cx) / (fw1 * 0.5);
+    const base = d < 1 ? 1 : Math.max(0, 1 - (d - 1) * 1.3);
+    mist[mistSrc * W + x] = (mistMax * base * (0.65 + rand() * 0.35)) | 0;
+  }
+  const drift = Math.abs(wind) * 0.5, dir = wind > 0 ? 1 : -1;
+  for (let y = mistTop; y < mistSrc; y++) {
+    for (let x = mx0; x <= mx1; x++) {
+      const below = mist[(y + 1) * W + x];
+      let dx = x + ((rand() * 5) | 0) - 2;
+      if (rand() < drift) dx += dir;
+      if (dx < mx0) dx = mx0; else if (dx > mx1) dx = mx1;
+      const dec = (rand() * 2.3) | 0;
+      mist[y * W + dx] = below > dec ? below - dec : 0;
+    }
+  }
+}
+
+function updateDrops() {
+  const n = Math.round(fw1 * 0.1);
+  for (let k = 0; k < n && drops.length < 600; k++) {
+    drops.push({x: cx + (rand() - 0.5) * fw1, y: poolY - rand() * 2, vx: (rand() - 0.5) * 1.3, vy: -(0.5 + rand() * 1.7), c: rand() < 0.6 ? FOAM : SPRAY});
+  }
+  for (let k = drops.length - 1; k >= 0; k--) {
+    const d = drops[k];
+    d.x += d.vx; d.y += d.vy; d.vy += 0.1;
+    if (d.vy > 0 && d.y > poolY + 2) { drops[k] = drops[drops.length - 1]; drops.pop(); }
+  }
+}
+
+function spawnLeaf() {
+  const fromFg = rand() < 0.6;
+  const list = fromFg ? fgLeaves : bgLeaves;
+  if (!list.length) return;
+  const i = list[(rand() * list.length) | 0];
+  const c = (fromFg ? fg : bg)[i];
+  if (!c) return;
+  const x = i % W, y = (i / W) | 0;
+  leaves.push({
+    x, y, vy: 0.25 + rand() * 0.35, ph: rand() * 6.28, dph: 0.06 + rand() * 0.1,
+    c, c2: shade(c, 0.6), big: fromFg && rand() < 0.5,
+    ty: Math.max(y + 8, poolY + rand() * (H - poolY + 6)), float: false, life: 0
+  });
+}
+
+function updateLeaves() {
+  let r = 0.25 + Math.abs(wind) * 0.6;
+  const max = Math.round(W * 0.25);
+  while (r > 0) { if (rand() < r && leaves.length < max) spawnLeaf(); r -= 1; }
+  for (let k = leaves.length - 1; k >= 0; k--) {
+    const l = leaves[k];
+    let gone = false;
+    if (!l.float) {
+      l.ph += l.dph;
+      l.x += wind * 0.9 + Math.sin(l.ph) * 0.45;
+      l.y += l.vy * (0.55 + 0.45 * Math.abs(Math.cos(l.ph)));
+      if (l.y >= l.ty) {
+        const xi = l.x | 0, yi = l.y | 0;
+        if (xi >= 0 && xi < W && yi >= 0 && yi < H) {
+          const i = yi * W + xi;
+          if (waterMask[i]) { l.float = true; l.life = 200 + rand() * 200; }
+          else { if (groundMask[i]) bg[i] = l.c; gone = true; }   // it lands and stays
+        } else gone = true;
+      }
+      if (l.x < -5 || l.x > W + 5 || l.y > H + 2) gone = true;
+    } else {
+      flowAt(l.x, l.y);
+      l.x += FX * 0.5 + wind * 0.1; l.y += FY * 0.5; l.life--;
+      const xi = l.x | 0, yi = l.y | 0;
+      if (l.life <= 0 || xi < 0 || xi >= W || yi < 0 || yi >= H || !waterMask[yi * W + xi]) gone = true;
+    }
+    if (gone) { leaves[k] = leaves[leaves.length - 1]; leaves.pop(); }
+  }
+}
+
+// Leaves catching the light: a few random leaves brighten for a moment, more when the wind blows.
+function twinkle() {
+  for (let k = tw.length - 1; k >= 0; k--) {
+    const t = tw[k];
+    if (--t.ttl <= 0) { t.L[t.i] = t.c; t.m[t.i] = 0; tw[k] = tw[tw.length - 1]; tw.pop(); }
+  }
+  const n = Math.round(W / 50 + Math.abs(wind) * W / 25);
+  for (let k = 0; k < n; k++) {
+    const fromFg = rand() < 0.65;
+    const list = fromFg ? fgLeaves : bgLeaves;
+    if (!list.length) continue;
+    const L = fromFg ? fg : bg, m = fromFg ? twFg : twBg;
+    const i = list[(rand() * list.length) | 0];
+    if (m[i]) continue;
+    m[i] = 1;
+    tw.push({L, m, i, c: L[i], ttl: ri(2, 8)});
+    L[i] = shade(L[i], 1.35);
+  }
+}
+
+function update() {
+  time += STEP / 1000; tick++;
+  if (rand() < 0.004) gustTarget = (rand() - 0.35) * 1.4;
+  gustTarget *= 0.996;
+  gust += (gustTarget - gust) * 0.03;
+  wind = 0.28 * Math.sin(time * 0.23) + 0.18 * Math.sin(time * 0.61 + 1.3) + gust;
+  updateFalls();
+  updateFoam();
+  if (tick & 1) updateMist();
+  updateDrops();
+  updateLeaves();
+  twinkle();
+}
+
+// ---------- drawing a frame ----------
+
+function drawFalls() {
+  for (let y = topRow; y <= poolY + 1; y++) {
+    const hw = halfAt(y);
+    const l = cx - hw + edgeL[y], r = cx + hw + edgeR[y];
+    const upper = y < lipY;
+    const x0 = Math.max(0, Math.floor(l) - 1), x1 = Math.min(W - 1, Math.ceil(r) + 1);
+    for (let x = x0; x <= x1; x++) {
+      const e = Math.min(x - l, r - x);
+      if (e < -1) continue;
+      const i = y * W + x;
+      let v = fall[i];
+      if (upper) v = (v * 0.55 + 6) | 0;                     // the river surface before the edge
+      else if (y - lipY < 2) v = Math.min(63, v + 14);       // light on the lip
+      let c = shade(FALL[v], 0.92 + 0.1 * clamp((x - cx) / hw * lightDir, -1, 1));
+      if (e < 4) c = mix(out[i], shade(c, 0.8), e < 0 ? 0.25 : 0.55 + e * 0.11);
+      out[i] = c;
+    }
+  }
+}
+
+function drawWater() {
+  const T = time;
+  for (let k = 0; k < wCount; k++) {
+    const x = wX[k], y = wY[k], depth = wD[k];
+    const amp = 0.4 + depth * 2.6;
+    const ox = Math.round(Math.sin(y * (1.1 - depth * 0.5) - T * 2.2 + Math.sin(x * 0.045 + T * 0.6) * 1.4) * amp);
+    let sy = poolY - 3 - Math.round(Math.max(0, y - poolY) * 0.9);   // mirror image of the falls and trees
+    if (sy < 0) sy = 0;
+    let sx = x + ox;
+    if (sx < 0) sx = 0; else if (sx >= W) sx = W - 1;
+    let c = mix(out[sy * W + sx], waterCol, 0.3 + depth * 0.3);
+    const i = wIdx[k], f = foamA[i];
+    if (f) c = mix(c, FOAM, FOAM_A[f]);
+    else if (rand() < 0.0012) c = mix(c, FOAM, 0.6);
+    out[i] = c;
+  }
+}
+
+function drawMist() {
+  for (let y = mistTop; y <= mistBot; y++) {
+    const below = y > mistSrc;
+    const fade = below ? 1 - (y - mistSrc) / (mistBot - mistSrc + 1) : 1;
+    for (let x = mx0; x <= mx1; x++) {
+      const m = below ? mist[mistSrc * W + x] * fade : mist[y * W + x];
+      if (m < 1) continue;
+      const edge = Math.min(1, (x - mx0) / 12, (mx1 - x) / 12);
+      let a = m / mistMax;
+      a = a * a * 0.72 * edge;
+      const i = y * W + x;
+      out[i] = mix(out[i], mistCol, a);
+    }
+  }
+}
+
+function drawDrops() {
+  for (let k = 0; k < drops.length; k++) {
+    const d = drops[k], x = Math.round(d.x), y = Math.round(d.y);
+    if (x >= 0 && x < W && y >= 0 && y < H) out[y * W + x] = d.c;
+  }
+}
+
+function drawLeaves(floating) {
+  for (let k = 0; k < leaves.length; k++) {
+    const l = leaves[k];
+    if (l.float !== floating) continue;
+    const x = Math.round(l.x), y = Math.round(l.y);
+    if (x < 0 || x >= W || y < 0 || y >= H) continue;
+    const c = floating || Math.sin(l.ph) > 0 ? l.c : l.c2;   // the two sides of a tumbling leaf
+    out[y * W + x] = c;
+    if (l.big && x + 1 < W) out[y * W + x + 1] = c;
+  }
+}
+
+function drawGrass() {
+  for (let b = 0; b < gN; b++) {
+    const h = gH[b], steps = Math.max(1, Math.round(h));
+    const bend = (gL[b] + (wind + Math.sin(time * 2.1 + gX[b] * 0.19 + gY[b] * 0.07) * 0.3) * gF[b]) * h * 0.6;
+    let px = 0, py = 0;
+    for (let s = 0; s <= steps; s++) {
+      const f = s / steps;
+      px = Math.round(gX[b] + bend * f * f);
+      py = gY[b] - s;
+      if (px < 0 || px >= W || py < 0) continue;
+      out[py * W + px] = f > 0.55 ? gT[b] : gB[b];
+    }
+    const fl = gFl[b];
+    if (fl && px >= 0 && px < W && py >= 0) {
+      out[py * W + px] = fl;
+      if (py > 0) out[(py - 1) * W + px] = fl;
+    }
+  }
+}
+
+function render() {
+  out.set(bg);
+  drawFalls();
+  drawWater();
+  drawLeaves(true);
+  drawDrops();
+  drawMist();
+  for (let k = 0; k < fgList.length; k++) { const i = fgList[k]; out[i] = fg[i]; }
+  drawGrass();
+  drawLeaves(false);
+  ctx.putImageData(img, 0, 0);
+}
+
+let last = 0, acc = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!last) last = now;
+  acc += Math.min(200, now - last);
+  last = now;
+  if (acc < STEP) return;
+  while (acc >= STEP) { update(); acc -= STEP; }
+  render();
+}
+
+build();
+render();
+requestAnimationFrame(loop);
+
+canvas.addEventListener('click', () => { build(); render(); });
+addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { build(); render(); } });
+
+let resizeTimer;
+addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const cw = Math.max(1, innerWidth), ch = Math.max(1, innerHeight), c = cellFor(cw, ch);
+    const nw = Math.ceil(cw / c), nh = Math.ceil(ch / c);
+    if (Math.abs(nw - W) > W * 0.08 || Math.abs(nh - H) > H * 0.08) { build(); render(); }
+  }, 200);
+});
+</script>
+</body>
+</html>

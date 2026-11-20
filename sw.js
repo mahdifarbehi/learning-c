@@ -1,11 +1,12 @@
 // Change the version when this file list changes.
-const CACHE = 'c-stories-v3';
+const CACHE = 'c-stories-v4';
 
 const ASSETS = [
   './',
   'index.html',
   'C Stories.html',
   'doom-fire.html',
+  'waterfall.html',
   'manifest.webmanifest',
   'icons/icon-192.png',
   'icons/icon-512.png',
