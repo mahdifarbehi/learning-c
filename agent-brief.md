@@ -75,6 +75,7 @@ The `requires:` line goes right after the lesson title, for example:
 - Static files only. No backend, no accounts, no framework, no build step if avoidable.
 - PWA: web manifest and a service worker so it works offline and is installable.
 - Cards advance only by hand: tap right side = next and tap left side = back. There is no timer or automatic advance; unanswered quiz cards cannot move forward.
+- Listen mode (owner, 2026-11-20) is the one exception. The ▶ button in a lesson, or "Listen to this chapter" / "Listen to the whole course" on the lesson list, reads the cards aloud with the device's own voice (Web Speech API, offline, nothing downloaded) and moves to the next card when it finishes. Code blocks and diagrams are not read. A quiz reads the question and options, waits 5 seconds, then shows and reads the answer and explanation; it is not counted in the score unless the reader taps an answer.
 - Progress is saved on the device with `localStorage`: last card seen and completed lessons.
 - Keep the existing minimal visual style: dark background, serif headings, monospace code, purple for concept cards, green for build cards, amber for quiz cards.
 - A working prototype, `c-stories.html` (a single file), is provided. Start from it and keep its behavior. Do not redesign it.

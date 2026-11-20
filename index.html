@@ -63,6 +63,12 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
 #bars i{display:block;height:100%;width:0;background:var(--fg)}
 #tag{position:absolute;top:calc(28px + env(safe-area-inset-top,0px));left:20px;z-index:5;font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600}
 #close{position:absolute;top:calc(22px + env(safe-area-inset-top,0px));right:14px;z-index:6;background:none;border:0;color:var(--fg);font-size:1.6rem;cursor:pointer}
+#play{position:absolute;top:calc(22px + env(safe-area-inset-top,0px));right:54px;z-index:6;background:none;border:0;color:var(--fg);font-size:1.25rem;line-height:1.6rem;padding:2px 8px;cursor:pointer}
+.listen-box{border:1px solid rgba(160,157,150,.45);border-radius:14px;padding:12px 16px;margin:0 0 10px;background:rgba(127,127,127,.08)}
+.listen-box summary{cursor:pointer;font-weight:600}
+.listen-box label{display:block;margin-top:12px;font-size:.9rem;color:var(--muted)}
+.listen-box select{display:block;width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid var(--muted);background:var(--bg);color:var(--fg);font:inherit}
+.listen-box .muted{margin:12px 0 0}
 #hint{position:absolute;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:0;right:0;text-align:center;font-size:.78rem;color:var(--muted)}
 </style>
 </head>
@@ -71,8 +77,17 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
   <main class="screen list-screen" id="home">
     <p class="eyebrow">Learn by building</p>
     <h1>C Stories</h1>
-    <p>Short lessons you move through by hand. Tap right for next and left for back.</p>
+    <p>Short lessons you move through by hand. Tap right for next and left for back, or tap ▶ to listen.</p>
     <div class="course-list" id="courses"></div>
+    <details class="listen-box" id="listenBox">
+      <summary>Listening voice</summary>
+      <label>Voice<select id="voice"></select></label>
+      <label>Speed<select id="rate">
+        <option value="0.9">Slower</option><option value="1">Normal</option><option value="1.1">A bit faster</option><option value="1.25">Faster</option><option value="1.5">Fast</option>
+      </select></label>
+      <button class="btn alt" id="testVoice">Test the voice</button>
+      <p class="muted">Uses the voices already on this device, so nothing downloads and it works offline. Voices marked “needs internet” do not.</p>
+    </details>
     <button class="btn alt" id="pick">Open a .md lesson file</button>
     <input type="file" id="file" accept=".md,.markdown,.txt" hidden>
     <p class="muted" id="offline" style="margin-top:14px">Progress stays on this device.</p>
@@ -106,7 +121,7 @@ pre.diagram{color:var(--fg);background:rgba(0,0,0,.2);white-space:pre-wrap;text-
   </section>
 
   <div id="story">
-    <div id="bars"></div><div id="tag"></div><button id="close" aria-label="Close">×</button>
+    <div id="bars"></div><div id="tag"></div><button id="play" aria-label="Listen">▶</button><button id="close" aria-label="Close">×</button>
     <div class="stage" id="stage"></div>
     <div id="hint">tap left or right</div>
   </div>
@@ -212,6 +227,18 @@ function body(markdown){
   return out;
 }
 
+// What listen mode reads: the prose only. Code blocks and diagrams are skipped.
+function plain(markdown){
+  const kept=[];let inFence=false;
+  for(const line of markdown.split('\n')){
+    if(/^```([A-Za-z0-9_-]*)\s*$/.test(line)){inFence=!inFence;continue;}
+    if(!inFence)kept.push(line);
+  }
+  return kept.join('\n').replace(/`([^`]+)`/g,'$1').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/\s+/g,' ').trim();
+}
+const sentenceEnd=s=>/[.!?:]$/.test(s)?s:s+'.';
+const spoken=(heading,text)=>[heading&&sentenceEnd(plain(heading)),plain(text)].filter(Boolean).join(' ');
+
 function parse(markdown){
   let title='Lesson',requires=[];
   markdown=markdown.replace(/^\s*# (.+)\n/,(match,value)=>{title=value.trim();return '';});
@@ -234,9 +261,9 @@ function parse(markdown){
         else if(line.startsWith('> '))explanation+=line.slice(2)+' ';
         else prose.push(line);
       }
-      return {tag:'quiz',heading,html:body(prose.join('\n')),quiz:{options,explanation:explanation.trim()}};
+      return {tag:'quiz',heading,html:body(prose.join('\n')),say:spoken(heading,prose.join('\n')),quiz:{options,explanation:explanation.trim()}};
     }
-    return {tag:tag==='build'?'build':'concept',heading,html:body(text)};
+    return {tag:tag==='build'?'build':'concept',heading,html:body(text),say:spoken(heading,text),hasCode:/^```/m.test(text)};
   });
   return {title,requires,cards};
 }
@@ -273,6 +300,14 @@ function renderCourse(courseId){
   $('courseCredit').innerHTML=course.credit||'';
   $('courseProgress').textContent=courseCounts(course);
   $('lessons').innerHTML='';
+  const listenButton=(label,items)=>{
+    const button=document.createElement('button');
+    button.className='btn alt';
+    button.textContent='▶ '+label;
+    button.onclick=()=>playLessons(items,{type:'course',courseId});
+    return button;
+  };
+  if(speech&&!course.lessons.some(item=>item.chapter))$('lessons').appendChild(listenButton('Listen to the whole course',course.lessons));
   let chapter='',number=0;
   course.lessons.forEach(item=>{
     if(item.chapter!==chapter){
@@ -282,6 +317,7 @@ function renderCourse(courseId){
         heading.className='chapter-title';
         heading.textContent=chapter;
         $('lessons').appendChild(heading);
+        if(speech)$('lessons').appendChild(listenButton('Listen to this chapter',course.lessons.filter(other=>other.chapter===chapter)));
       }
     }
     number++;
@@ -343,7 +379,7 @@ function renderPrerequisites(){
 let lesson=null,currentItem=null,currentMarkdown='',returnTarget={type:'home'};
 let cardIndex=0,answered=false,score=0,total=0;
 
-function beginLesson(item,markdown,target){
+function beginLesson(item,markdown,target,from){
   lesson=parse(markdown);
   if(!lesson.cards.length)return;
   currentItem=item;
@@ -351,7 +387,7 @@ function beginLesson(item,markdown,target){
   returnTarget=target;
   score=0;total=0;
   const progress=item?.path?loadProgress(item.path):null;
-  const startAt=progress&&!progress.done?progress.card||0:0;
+  const startAt=from??(progress&&!progress.done?progress.card||0:0);
   $('bars').innerHTML=lesson.cards.map(()=>'<div><i></i></div>').join('');
   show('story');
   go(startAt);
@@ -369,7 +405,9 @@ function go(next){
   if(next>=lesson.cards.length){
     persist(true);
     $('doneTitle').textContent=lesson.title+(total?` · Quiz ${score}/${total}`:'');
-    show('done');return;
+    show('done');
+    if(player.on)lessonEnd();
+    return;
   }
   cardIndex=next;
   const card=lesson.cards[cardIndex];
@@ -382,23 +420,224 @@ function go(next){
   if(card.quiz)document.querySelectorAll('.opt').forEach(button=>button.onclick=()=>answer(Number(button.dataset.index)));
   [...$('bars').children].forEach((bar,index)=>bar.firstChild.style.width=index<cardIndex?'100%':'0');
   persist(false);
+  if(player.on)playCard();
 }
 
-function answer(index){
-  if(answered)return;
-  answered=true;const quiz=lesson.cards[cardIndex].quiz;total++;
-  if(quiz.options[index].correct)score++;
+// picked is the option the reader tapped, or -1 when listen mode reveals the answer itself.
+function showAnswer(picked){
+  answered=true;const quiz=lesson.cards[cardIndex].quiz;
   document.querySelectorAll('.opt').forEach((button,buttonIndex)=>{
     button.disabled=true;
     if(quiz.options[buttonIndex].correct)button.classList.add('ok');
-    else if(buttonIndex===index)button.classList.add('bad');
+    else if(buttonIndex===picked)button.classList.add('bad');
   });
-  $('fb').innerHTML=`<p>${quiz.options[index].correct?'Correct. ':'Not quite. '}${inline(quiz.explanation)}</p><button class="btn next">Continue</button>`;
+  const lead=picked<0?'':quiz.options[picked].correct?'Correct. ':'Not quite. ';
+  $('fb').innerHTML=`<p>${lead}${inline(quiz.explanation)}</p><button class="btn next">Continue</button>`;
   $('fb').querySelector('.next').onclick=()=>go(cardIndex+1);
   $('bars').children[cardIndex].firstChild.style.width='100%';
 }
 
+function answer(index){
+  if(answered)return;
+  const quiz=lesson.cards[cardIndex].quiz;total++;
+  const correct=quiz.options[index].correct;
+  if(correct)score++;
+  showAnswer(index);
+  if(player.on){
+    hush();setPlayUI();
+    speak([correct?'Correct.':'Not quite.',...sentences(plain(quiz.explanation))],()=>advance(800));
+  }
+}
+
+// ---- Listen mode: the device's own voice reads the cards. Nothing downloads, and it works offline. ----
+const speech='speechSynthesis' in window?window.speechSynthesis:null;
+const LISTEN_KEY='cstories:listen';
+const QUIZ_WAIT=5000;
+const listen={voice:'',rate:1};
+try{Object.assign(listen,JSON.parse(localStorage.getItem(LISTEN_KEY))||{});}catch{}
+const saveListen=()=>{try{localStorage.setItem(LISTEN_KEY,JSON.stringify(listen));}catch{}};
+// Joke and robotic voices that Apple devices list next to the good ones.
+const NOVELTY=/\b(albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|ralph|kathy|grandma|grandpa|rocko|shelley|eddy|flo|reed|sandy)\b/i;
+const player={on:false,queue:[],chapter:false,target:null,token:0,run:0,timer:0,utter:null,wake:null,resumeOnShow:false};
+let voices=[];
+
+function loadVoices(){
+  voices=speech.getVoices();
+  const english=voices.filter(voice=>/^en/i.test(voice.lang));
+  const select=$('voice');
+  select.innerHTML='';
+  select.appendChild(new Option('Best on this device',''));
+  for(const voice of english.length?english:voices){
+    select.appendChild(new Option(`${voice.name} · ${voice.lang}${voice.localService?'':' · needs internet'}`,voice.voiceURI));
+  }
+  select.value=voices.some(voice=>voice.voiceURI===listen.voice)?listen.voice:'';
+}
+
+function chooseVoice(){
+  if(!voices.length)loadVoices();
+  const chosen=voices.find(voice=>voice.voiceURI===listen.voice);
+  if(chosen)return chosen;
+  const score=voice=>(/^en/i.test(voice.lang)?10:0)+(voice.localService?4:0)+(/premium|enhanced|natural|neural/i.test(voice.name)?3:0)+(/^en[-_]us/i.test(voice.lang)?1:0)-(NOVELTY.test(voice.name)?20:0);
+  return voices.slice().sort((a,b)=>score(b)-score(a))[0]||null;
+}
+
+const sentences=text=>text.replace(/([.!?])\s+/g,'$1\n').split('\n').map(part=>part.trim()).filter(Boolean);
+
+// Speaks the parts one sentence at a time (long utterances get cut off in some browsers), then calls done.
+// A newer speak() or stopPlay() makes this one stop quietly.
+function speak(parts,done,progress){
+  const token=++player.token;
+  let index=0;
+  const next=()=>{
+    if(token!==player.token)return;
+    if(progress)progress(parts.length?index/parts.length:1);
+    if(index>=parts.length){player.utter=null;if(done)done();return;}
+    const utter=new SpeechSynthesisUtterance(parts[index++]);
+    const voice=chooseVoice();
+    if(voice){utter.voice=voice;utter.lang=voice.lang;}else utter.lang='en-US';
+    utter.rate=listen.rate;
+    // Some Android voices never send "end". Move on anyway after a generous time for this sentence.
+    let finished=false;
+    const finish=()=>{if(finished)return;finished=true;clearTimeout(watchdog);next();};
+    const watchdog=setTimeout(finish,utter.text.length*90/listen.rate+4000);
+    utter.onend=finish;
+    utter.onerror=event=>{
+      finished=true;clearTimeout(watchdog);
+      if(token!==player.token)return;
+      // Our own cancels change the token first, so this is an outside interruption (a call, another app).
+      stopPlay();$('hint').textContent='paused · tap ▶ to go on';
+    };
+    player.utter=utter;
+    speech.speak(utter);
+  };
+  next();
+}
+
+// Silences everything that is queued. The token changes first, so a cancelled sentence never continues.
+function hush(){
+  player.token++;
+  clearTimeout(player.timer);player.timer=0;
+  speech.cancel();
+}
+
+const setBar=fraction=>{const bar=$('bars').children[cardIndex];if(bar)bar.firstChild.style.width=(fraction*100)+'%';};
+
+function advance(wait){
+  clearTimeout(player.timer);
+  player.timer=setTimeout(()=>{player.timer=0;go(cardIndex+1);},wait);
+}
+
+function playCard(){
+  hush();
+  setPlayUI();
+  const card=lesson.cards[cardIndex];
+  const parts=sentences(card.say);
+  // A quiz that is already answered: read the explanation and move on.
+  if(card.quiz&&answered){speak(sentences(plain(card.quiz.explanation)),()=>advance(800));return;}
+  if(!card.quiz){speak(parts,()=>advance(card.hasCode?1800:600),setBar);return;}
+  const options=card.quiz.options.map((option,index)=>`Option ${index+1}: ${sentenceEnd(plain(option.text))}`);
+  speak(parts.concat(options),()=>{
+    $('hint').textContent='answer now, or wait to hear it';
+    player.timer=setTimeout(()=>{
+      if(answered)return;
+      showAnswer(-1);
+      setPlayUI();
+      const right=card.quiz.options.find(option=>option.correct);
+      speak([right?`The answer is: ${sentenceEnd(plain(right.text))}`:'',...sentences(plain(card.quiz.explanation))].filter(Boolean),()=>advance(800));
+    },QUIZ_WAIT);
+  });
+}
+
+function lessonEnd(){
+  const next=player.queue[0];
+  if(next)speak([`Lesson complete. Next lesson: ${sentenceEnd(next.title)}`],playNextLesson);
+  else speak([player.chapter?'That is the end.':'Lesson complete.'],stopPlay);
+}
+
+async function playNextLesson(){
+  const run=player.run,item=player.queue.shift();
+  try{
+    const markdown=await fetchLesson(item);
+    if(player.on&&run===player.run)beginLesson(item,markdown,player.target,0);
+    // Paused while it loaded: keep it first in line for when listening goes on.
+    else if(!player.on&&player.chapter)player.queue.unshift(item);
+  }catch(error){if(run===player.run){stopPlay();alert(error.message);}}
+}
+
+// iOS only lets a page speak after a tap, so speak a silent word inside the tap first.
+function unlockSpeech(){
+  speech.cancel();
+  const utter=new SpeechSynthesisUtterance(' ');
+  utter.volume=0;
+  speech.speak(utter);
+}
+
+function playLessons(items,target){
+  if(!speech||!items.length)return;
+  unlockSpeech();
+  player.run++;
+  player.queue=items.slice();player.chapter=true;player.target=target;
+  player.on=true;keepAwake(true);setPlayUI();
+  playNextLesson();
+}
+
+function startPlay(){
+  if(!speech||!lesson)return;
+  player.on=true;player.resumeOnShow=false;keepAwake(true);
+  playCard();
+}
+
+function stopPlay(){
+  player.on=false;player.run++;
+  if(speech)hush();
+  keepAwake(false);setPlayUI();
+}
+
+function setPlayUI(){
+  $('play').textContent=player.on?'❚❚':'▶';
+  $('play').setAttribute('aria-label',player.on?'Pause':'Listen');
+  $('hint').textContent=player.on?'listening · tap left or right to skip':'tap left or right';
+}
+
+// Speech stops when the phone locks, so keep the screen on while listening.
+async function keepAwake(on){
+  try{
+    if(on&&!player.wake&&'wakeLock' in navigator){
+      const lock=await navigator.wakeLock.request('screen');
+      if(!player.on||player.wake){lock.release();return;}
+      player.wake=lock;
+      lock.addEventListener('release',()=>{if(player.wake===lock)player.wake=null;});
+    }else if(!on&&player.wake){
+      const lock=player.wake;player.wake=null;await lock.release();
+    }
+  }catch{}
+}
+document.addEventListener('visibilitychange',()=>{
+  if(!speech)return;
+  if(document.visibilityState==='hidden'){
+    if(player.on){stopPlay();player.resumeOnShow=true;}
+  }else if(player.resumeOnShow){
+    player.resumeOnShow=false;
+    if($('story').style.display==='block')startPlay();
+    else if($('done').style.display!=='none'&&player.chapter&&player.queue.length){player.on=true;keepAwake(true);playNextLesson();}
+  }
+});
+
+if(speech){
+  loadVoices();
+  speech.onvoiceschanged=loadVoices;
+  $('voice').onchange=()=>{listen.voice=$('voice').value;saveListen();};
+  $('rate').value=String(listen.rate);
+  $('rate').onchange=()=>{listen.rate=Number($('rate').value)||1;saveListen();};
+  $('testVoice').onclick=()=>{stopPlay();speak(['Hello. This is how your lessons will sound.']);};
+  $('play').onclick=()=>{$('play').blur();player.on?stopPlay():startPlay();};
+}else{
+  $('play').style.display='none';
+  $('listenBox').style.display='none';
+}
+
 function leaveStory(){
+  stopPlay();player.queue=[];player.chapter=false;player.resumeOnShow=false;
   if(returnTarget.type==='prereqs'&&pending)renderPrerequisites();
   else if(returnTarget.type==='course')renderCourse(returnTarget.courseId);
   else renderHome();
@@ -419,14 +658,15 @@ stage.addEventListener('pointerup',event=>{
   if(!event.target.closest('button')&&performance.now()-pointerDownAt<300&&moved<12){
     const bounds=stage.getBoundingClientRect();
     const forward=(event.clientX-bounds.left)>=bounds.width*.35;
-    if(forward&&lesson.cards[cardIndex].quiz&&!answered)return;
+    if(forward&&lesson.cards[cardIndex].quiz&&!answered&&!player.on)return;
     go(forward?cardIndex+1:cardIndex-1);
   }
 });
 stage.addEventListener('pointercancel',()=>{pointerActive=false;});
 document.addEventListener('keydown',event=>{
   if($('story').style.display!=='block')return;
-  if((event.key==='ArrowRight'||event.key===' ')&&!(lesson.cards[cardIndex].quiz&&!answered))go(cardIndex+1);
+  if(event.key===' ')event.preventDefault();
+  if((event.key==='ArrowRight'||event.key===' ')&&!(lesson.cards[cardIndex].quiz&&!answered&&!player.on))go(cardIndex+1);
   if(event.key==='ArrowLeft')go(cardIndex-1);
   if(event.key==='Escape')leaveStory();
 });
